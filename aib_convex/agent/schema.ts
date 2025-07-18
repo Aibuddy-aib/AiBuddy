@@ -47,7 +47,6 @@ export const agentTables = {
     textHash: v.bytes(),
     embedding: v.array(v.float64()),
   }).index('text', ['textHash']),
-  // 新增 agents 表
   agents: defineTable({
     worldId: v.id('worlds'),
     id: v.string(),
@@ -59,5 +58,5 @@ export const agentTables = {
     state: v.optional(v.string()),
     identity: v.optional(v.string()),
     plan: v.optional(v.string()),
-  }).index('worldId', ['worldId']), // 可选索引，便于按世界查询
+  }).index('worldId', ['worldId']),
 };

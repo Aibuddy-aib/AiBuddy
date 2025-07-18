@@ -3,14 +3,14 @@ import { v } from 'convex/values';
 import { Id } from '../_generated/dataModel';
 import { ActionCtx, internalQuery } from '../_generated/server';
 import { LLMMessage, chatCompletion } from '../util/llm';
-import * as memory from './memory'; // 改为新的 memory 模块
+import * as memory from './memory';
 import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
 import { GameId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
 import { SerializedPlayer } from '../aiTown/player';
 import { SerializedAgent } from '../aiTown/agent';
-import { Memory } from './memory'; // 明确导入 Memory 类型
+import { Memory } from './memory';
 
 const selfInternal = internal.agent.conversation;
 
@@ -353,35 +353,35 @@ function stopWords(otherPlayer: string, player: string): string[] {
   return variants.flatMap((stop) => [stop + ':', stop.toLowerCase() + ':']);
 }
 
-// 添加重试逻辑的辅助函数
+// add retry logic helper function
 async function chatCompletionWithRetry(options: any, maxRetries = 3): Promise<any> {
   let retries = 0;
   while (true) {
     try {
       return await chatCompletion(options);
     } catch (error: any) {
-      // 检查是否是速率限制错误（429）
+      // check if it's a rate limit error (429)
       if (error.message && error.message.includes('429') && retries < maxRetries) {
         retries++;
-        // 解析等待时间，如果有的话
-        let waitTime = 2000 * retries; // 默认等待时间，每次重试增加
+        // parse wait time, if there is one
+        let waitTime = 2000 * retries; // default wait time, increase each retry
         
         try {
-          // 尝试从错误消息中提取建议的等待时间
+          // try to extract suggested wait time from error message
           const match = error.message.match(/Please try again in (\d+\.\d+)s/);
           if (match && match[1]) {
-            // 将建议等待时间转换为毫秒，并加上一点缓冲
+            // convert suggested wait time to milliseconds, and add a little buffer
             waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 500;
           }
         } catch (e) {
-          // 如果解析失败，使用默认等待时间
+          // if parsing fails, use default wait time
         }
         
-        console.log(`API速率限制错误，等待${waitTime}ms后重试 (${retries}/${maxRetries})...`);
+        console.log(`API rate limit error, waiting ${waitTime}ms before retrying (${retries}/${maxRetries})...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
-      // 其他错误或重试次数用完，抛出错误
+      // other errors or retries exhausted, throw error
       throw error;
     }
   }
