@@ -125,20 +125,20 @@ export class Conversation {
     }
     // Ensure the players still exist.
     if ([...game.world.conversations.values()].find((c) => c.participants.has(player.id))) {
-      const reason = `Player ${player.id} is already in a conversation`;
+      const reason = `Player ${player.name} is already in a conversation`;
       console.log(reason);
       return { error: reason };
     }
     if ([...game.world.conversations.values()].find((c) => c.participants.has(invitee.id))) {
-      const reason = `Player ${invitee.id} is already in a conversation`;
+      const reason = `Player ${invitee.name} is already in a conversation`;
       console.log(reason);
       return { error: reason };
     }
     
-    // 添加距离检查，确保角色必须靠近才能对话
+    // add distance check, ensure characters must be close to each other to start a conversation
     const playerDistance = distance(player.position, invitee.position);
     if (playerDistance > 20) {
-      const reason = `Player ${player.id} is too far from ${invitee.id} to start a conversation (${playerDistance.toFixed(2)} units)`;
+      const reason = `Player ${player.name} is too far from ${invitee.name} to start a conversation (${playerDistance.toFixed(2)} units)`;
       console.log(reason);
       return { error: reason };
     }
