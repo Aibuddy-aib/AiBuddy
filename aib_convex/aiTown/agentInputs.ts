@@ -5,11 +5,9 @@ import { Conversation, conversationInputs } from './conversation';
 import { movePlayer } from './movement';
 import { inputHandler } from './inputHandler';
 import { point } from '../util/types';
-import { Path } from '../util/types';
 import { Descriptions, characters } from '../../data/characters';
 import { AgentDescription } from './agentDescription';
 import { Agent } from './agent';
-import { AIBTokenService } from '../services/aibTokenService';
 
 export const agentInputs = {
   finishRememberConversation: inputHandler({
@@ -31,6 +29,39 @@ export const agentInputs = {
       } else {
         delete agent.inProgressOperation;
         delete agent.toRemember;
+      }
+      return null;
+    },
+  }),
+  finishWalk: inputHandler({
+    args: {
+      operationId: v.string(),
+      agentId: v.id('agents'),
+      destination: v.optional(point),
+    },
+    handler: (game, now, args) => {
+      const agentId = parseGameId('agents', args.agentId);
+      const agent = game.world.agents.get(agentId);
+      if (!agent) {
+        throw new Error(`Couldn't find agent: ${agentId}`);
+      }
+      // check if operation matches
+      if (
+        !agent.inProgressOperation ||
+        agent.inProgressOperation.operationId !== args.operationId
+      ) {
+        console.debug(`Agent ${agentId} didn't have ${args.operationId} in progress`);
+        return null;
+      }
+      // clear inProgressOperation
+      delete agent.inProgressOperation;
+
+      // move agent to target position
+      if (args.destination) {
+        const player = game.world.players.get(agent.playerId);
+        if (player) {
+          movePlayer(game, now, player, args.destination);
+        }
       }
       return null;
     },
@@ -131,10 +162,7 @@ export const agentInputs = {
       const char = characters.find(c => c.name === desc.character);
       if (!char) throw new Error(`Character ${desc.character} not found`);
 
-      // 生成以太坊地址和代币数量
-      const ethAddress = Player.generateRandomEthAddress();
-      const aibtoken = parseFloat((Math.random() * 20000).toFixed(4));
-
+      // generate ethereum address and token amount
       const playerId = Player.join(
         game,
         now,
@@ -142,16 +170,16 @@ export const agentInputs = {
         desc.character,
         identity ?? desc.identity,
         undefined,
-        ethAddress
+        // ethAddress
       );
       
-      // 确保Player对象已设置isWorking属性
+      // ensure Player object has isWorking property
       const player = game.world.players.get(parseGameId('players', playerId));
       if (player && player.isWorking === undefined) {
         player.isWorking = false;
       }
       
-      // 确保PlayerDescription对象已设置isWorking属性
+      // ensure PlayerDescription object has isWorking property
       const playerDesc = game.playerDescriptions.get(parseGameId('players', playerId));
       if (playerDesc && playerDesc.isWorking === undefined) {
         playerDesc.isWorking = false;
@@ -174,7 +202,6 @@ export const agentInputs = {
           lastConversation: undefined,
           lastInviteAttempt: undefined,
           toRemember: undefined,
-          ethAddress,
         }),
       );
       game.agentDescriptions.set(
@@ -183,19 +210,10 @@ export const agentInputs = {
           agentId: agentId,
           identity: identity ?? desc.identity,
           plan: plan ?? desc.plan,
-          ethAddress,
         }),
       );
       
-      // 使用AIBTokenService同步代币数据
-      // 从Player对象到PlayerDescription对象
-      if (player) {
-        // 旧代码: AIBTokenService.syncTokenData(game, playerId);
-        // 现在Player和PlayerDescription已经独立，不需要同步
-        // PlayerDescription不再存储aibtoken字段
-      }
-      
-      game.descriptionsModified = true; // 标记描述已修改，确保保存
+      game.descriptionsModified = true; // mark descriptions as modified, ensure saving
       console.log(`Created agent ${agentId}: ${customName ?? desc.name}`);
       return { agentId };
     },

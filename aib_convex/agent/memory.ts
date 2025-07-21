@@ -13,13 +13,13 @@ export const MEMORY_ACCESS_THROTTLE = 300_000;
 const MEMORY_OVERFETCH = 10;
 const selfInternal = internal.agent.memory;
 
-export type Memory = Doc<'memories'> & { description?: string }; // 添加 description 可选字段
+export type Memory = Doc<'memories'> & { description?: string };
 export type MemoryType = Memory['data']['type'];
 export type MemoryOfType<T extends MemoryType> = Omit<Memory, 'data'> & {
   data: Extract<Memory['data'], { type: T }>;
 };
 
-// 修改 searchMemories，避免访问不存在的 content
+// update searchMemories, avoid accessing non-existent content
 export async function searchMemories(
   ctx: ActionCtx,
   args: {
@@ -40,11 +40,10 @@ export async function searchMemories(
   });
   return rankedMemories.map(({ memory }) => ({
     ...memory,
-    description: memory.description || '', // 只使用 description，移除 content
+    description: memory.description || '', // only use description, remove content
   }));
 }
 
-// ... 其余代码保持不变 ...
 export async function rememberConversation(
   ctx: ActionCtx,
   worldId: Id<'worlds'>,
@@ -57,6 +56,10 @@ export async function rememberConversation(
     playerId,
     conversationId,
   });
+  if (!data) {
+    console.warn(`Conversation ${conversationId} does not exist, skipping memorization`);
+    return;
+  }
   const { player, otherPlayer } = data;
   const messages = await ctx.runQuery(selfInternal.loadMessages, { worldId, conversationId });
   if (!messages.length) {
@@ -166,7 +169,9 @@ export const loadConversation = internalQuery({
       .withIndex('worldId', (q) => q.eq('worldId', args.worldId).eq('id', args.conversationId))
       .first();
     if (!conversation) {
-      throw new Error(`Conversation ${args.conversationId} not found`);
+      // throw new Error(`Conversation ${args.conversationId} not found`);
+      console.warn(`Conversation ${args.conversationId} does not exist, skipping memorization`);
+      return;
     }
     const otherParticipator = await ctx.db
       .query('participatedTogether')
@@ -247,9 +252,6 @@ export const loadConversation = internalQuery({
   },
 });
 
-// ... 其余代码保持不变 ...
-
-// ... 其余代码保持不变（假设没有其他问题） ...
 function makeRange(values: number[]) {
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -520,35 +522,35 @@ export async function latestMemoryOfType<T extends MemoryType>(
   return entry as MemoryOfType<T>;
 }
 
-// 添加重试逻辑的辅助函数
+// add retry logic helper function
 async function chatCompletionWithRetry(options: any, maxRetries = 3): Promise<any> {
   let retries = 0;
   while (true) {
     try {
       return await chatCompletion(options);
     } catch (error: any) {
-      // 检查是否是速率限制错误（429）
+      // check if it's a rate limit error (429)
       if (error.message && error.message.includes('429') && retries < maxRetries) {
         retries++;
-        // 解析等待时间，如果有的话
-        let waitTime = 2000 * retries; // 默认等待时间，每次重试增加
+        // parse wait time, if there is one
+        let waitTime = 2000 * retries; // default wait time, increase each retry
         
         try {
-          // 尝试从错误消息中提取建议的等待时间
+          // try to extract suggested wait time from error message
           const match = error.message.match(/Please try again in (\d+\.\d+)s/);
           if (match && match[1]) {
-            // 将建议等待时间转换为毫秒，并加上一点缓冲
+            // convert suggested wait time to milliseconds, and add a little buffer
             waitTime = Math.ceil(parseFloat(match[1]) * 1000) + 500;
           }
         } catch (e) {
-          // 如果解析失败，使用默认等待时间
+          // if parsing fails, use default wait time
         }
         
-        console.log(`API速率限制错误，等待${waitTime}ms后重试 (${retries}/${maxRetries})...`);
+        console.log(`API rate limit error, waiting ${waitTime}ms before retrying (${retries}/${maxRetries})...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
-      // 其他错误或重试次数用完，抛出错误
+      // other errors or retries exhausted, throw error
       throw error;
     }
   }

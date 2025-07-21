@@ -1,7 +1,6 @@
 import { v } from 'convex/values';
 import { GameId, parseGameId } from './ids';
-import { conversationId } from './ids';
-import { SerializedPlayer, serializedPlayer } from './player';
+import { serializedPlayer } from './player';
 import { Game } from './game';
 import {
   ACTION_TIMEOUT,
@@ -22,11 +21,7 @@ import { distance } from '../util/geometry';
 import { internal } from '../_generated/api';
 import { movePlayer } from './movement';
 import { insertInput } from './insertInput';
-import { WorldMap } from './worldMap';
-import { sleep } from '../util/sleep';
-import { api } from '../_generated/api';
 
-// 定义 SerializedAgent 类型（显式定义）
 export const serializedAgent = {
   id: v.string(),
   playerId: v.string(),
@@ -48,7 +43,7 @@ export const serializedAgent = {
     }),
   ),
   ethAddress: v.optional(v.string()),
-  aibtoken: v.optional(v.number()),  // 临时添加以允许部署
+  aibtoken: v.optional(v.number()),
 };
 export type SerializedAgent = {
   id: string;
@@ -109,46 +104,51 @@ export class Agent {
     this.ethAddress = data.ethAddress;
   }
 
-  // 获取代币余额的方法
+  getProgressOperation(playerId: string | undefined): string {
+    if (!playerId) {
+      return 'unknown';
+    }
+    if (this.inProgressOperation?.operationId === playerId) {
+      return this.inProgressOperation?.name || 'none';
+    }
+    return 'none';
+  }
+
+  // get AIB tokens balance
   getAIBTokens(game: Game): number {
     const player = game.world.players.get(this.playerId);
     if (!player) return 0;
     return player.aibtoken ?? 0;
   }
-
-  tick(game: Game, now: number) {
+  
+  old_tick(game: Game, now: number) {
     const player = game.world.players.get(this.playerId);
     if (!player) {
       throw new Error(`Invalid player ID ${this.playerId}`);
     }
-    
-    // 如果代理正在寻路或执行操作，不要干扰它
-    if (player.pathfinding || this.inProgressOperation) {
-      // 如果操作超时，则清除它
-      if (this.inProgressOperation && now > this.inProgressOperation.started + ACTION_TIMEOUT) {
-        console.log(`操作 ${this.inProgressOperation.name} (${this.inProgressOperation.operationId}) 超时，清除状态`);
-        delete this.inProgressOperation;
-      } else {
-        // 否则继续等待
+    if (this.inProgressOperation) {
+      if (now < this.inProgressOperation.started + ACTION_TIMEOUT) {
+        // Wait on the operation to finish.
         return;
       }
+      console.warn(`Timing out ${JSON.stringify(this.inProgressOperation)}`);
+      delete this.inProgressOperation;
     }
-    
     const conversation = game.world.playerConversation(player);
     const member = conversation?.participants.get(player.id);
-    
+
     const recentlyAttemptedInvite =
       this.lastInviteAttempt && now < this.lastInviteAttempt + CONVERSATION_COOLDOWN;
     const doingActivity = player.activity && player.activity.until > now;
-    
     if (doingActivity && (conversation || player.pathfinding)) {
       player.activity!.until = now;
     }
-    
-    // 优先选择移动而不是其他活动
+    // If we're not in a conversation, do something.
+    // If we aren't doing an activity or moving, do something.
+    // If we have been wandering but haven't thought about something to do for
+    // a while, do something.
     if (!conversation && !doingActivity && (!player.pathfinding || !recentlyAttemptedInvite)) {
-      console.log(`代理 ${this.name || this.id} 将开始行动`);
-      this.startOperation(game, now, 'agentDoSomething', {
+      this.startOperation(game, now, 'agentDoSomething', 'agent', {
         worldId: game.worldId,
         player: player.serialize(),
         otherFreePlayers: [...game.world.players.values()]
@@ -162,11 +162,11 @@ export class Agent {
       });
       return;
     }
-    
-    // 其他逻辑保持不变
+    // Check to see if we have a conversation we need to remember.
     if (this.toRemember) {
-      console.log(`Agent ${this.id} remembering conversation ${this.toRemember}`);
-      this.startOperation(game, now, 'agentRememberConversation', {
+      // Fire off the action to remember the conversation.
+      // console.log(`Agent ${this.id} remembering conversation ${this.toRemember}`);
+      this.startOperation(game, now, 'agentRememberConversation', 'agent', {
         worldId: game.worldId,
         playerId: this.playerId,
         agentId: this.id,
@@ -175,60 +175,43 @@ export class Agent {
       delete this.toRemember;
       return;
     }
-    
-    // 对话相关逻辑也保持不变
     if (conversation && member) {
-      const [otherPlayerId] = [...conversation.participants.entries()].find(
+      const [otherPlayerId, otherMember] = [...conversation.participants.entries()].find(
         ([id]) => id !== player.id,
       )!;
       const otherPlayer = game.world.players.get(otherPlayerId)!;
       if (member.status.kind === 'invited') {
-        if (otherPlayer.human || Math.random() < INVITE_ACCEPT_PROBABILITY) {
-          console.log(`Agent ${player.id} accepting invite from ${otherPlayer.id}`);
-          
-          // 获取两个玩家之间的距离
-          const playerDistance = distance(player.position, otherPlayer.position);
-          console.log(`Distance between ${player.id} and ${otherPlayer.id}: ${playerDistance.toFixed(2)} units`);
-          
+        // Accept a conversation with another agent with some probability and with
+        // a human unconditionally.
+        if (otherPlayer.ethAddress || Math.random() < INVITE_ACCEPT_PROBABILITY) {
+          // console.log(`Agent ${player.id} accepting invite from ${otherPlayer.id}`);
           conversation.acceptInvite(game, player);
-          
-          // 确保玩家移动到对方附近
-          if (playerDistance > CONVERSATION_DISTANCE && !player.pathfinding) {
-            let destination;
-            if (playerDistance < MIDPOINT_THRESHOLD) {
-              destination = {
-                x: Math.floor(otherPlayer.position.x),
-                y: Math.floor(otherPlayer.position.y),
-              };
-            } else {
-              destination = {
-                x: Math.floor((player.position.x + otherPlayer.position.x) / 2),
-                y: Math.floor((player.position.y + otherPlayer.position.y) / 2),
-              };
-            }
-            console.log(`Agent ${player.id} will move towards ${otherPlayer.id} to start conversation...`, destination);
-            movePlayer(game, now, player, destination);
-          }
-          
+          // Stop moving so we can start walking towards the other player.
           if (player.pathfinding) {
             delete player.pathfinding;
           }
         } else {
-          console.log(`Agent ${player.id} rejecting invite from ${otherPlayer.id}`);
+          // console.log(`Agent ${player.id} rejecting invite from ${otherPlayer.id}`);
           conversation.rejectInvite(game, now, player);
         }
         return;
       }
       if (member.status.kind === 'walkingOver') {
+        // Leave a conversation if we've been waiting for too long.
         if (member.invited + INVITE_TIMEOUT < now) {
-          console.log(`Giving up on invite to ${otherPlayer.id}`);
+          // console.log(`Giving up on invite to ${otherPlayer.id}`);
           conversation.leave(game, now, player);
           return;
         }
+
+        // Don't keep moving around if we're near enough.
         const playerDistance = distance(player.position, otherPlayer.position);
         if (playerDistance < CONVERSATION_DISTANCE) {
           return;
         }
+
+        // Keep moving towards the other player.
+        // If we're close enough to the player, just walk to them directly.
         if (!player.pathfinding) {
           let destination;
           if (playerDistance < MIDPOINT_THRESHOLD) {
@@ -242,7 +225,7 @@ export class Agent {
               y: Math.floor((player.position.y + otherPlayer.position.y) / 2),
             };
           }
-          console.log(`Agent ${player.id} walking towards ${otherPlayer.id}...`, destination);
+          // console.log(`Agent ${player.id} walking towards ${otherPlayer.id}...`, destination);
           movePlayer(game, now, player, destination);
         }
         return;
@@ -250,16 +233,19 @@ export class Agent {
       if (member.status.kind === 'participating') {
         const started = member.status.started;
         if (conversation.isTyping && conversation.isTyping.playerId !== player.id) {
+          // Wait for the other player to finish typing.
           return;
         }
         if (!conversation.lastMessage) {
           const isInitiator = conversation.creator === player.id;
           const awkwardDeadline = started + AWKWARD_CONVERSATION_TIMEOUT;
+          // Send the first message if we're the initiator or if we've been waiting for too long.
           if (isInitiator || awkwardDeadline < now) {
-            console.log(`${player.id} initiating conversation with ${otherPlayer.id}.`);
+            // Grab the lock on the conversation and send a "start" message.
+            // console.log(`${player.id} initiating conversation with ${otherPlayer.id}.`);
             const messageUuid = crypto.randomUUID();
             conversation.setIsTyping(now, player, messageUuid);
-            this.startOperation(game, now, 'agentGenerateMessage', {
+            this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
               worldId: game.worldId,
               playerId: player.id,
               agentId: this.id,
@@ -270,15 +256,17 @@ export class Agent {
             });
             return;
           } else {
+            // Wait on the other player to say something up to the awkward deadline.
             return;
           }
         }
+        // See if the conversation has been going on too long and decide to leave.
         const tooLongDeadline = started + MAX_CONVERSATION_DURATION;
         if (tooLongDeadline < now || conversation.numMessages > MAX_CONVERSATION_MESSAGES) {
-          console.log(`${player.id} leaving conversation with ${otherPlayer.id}.`);
+          // console.log(`${player.id} leaving conversation with ${otherPlayer.id}.`);
           const messageUuid = crypto.randomUUID();
           conversation.setIsTyping(now, player, messageUuid);
-          this.startOperation(game, now, 'agentGenerateMessage', {
+          this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
             worldId: game.worldId,
             playerId: player.id,
             agentId: this.id,
@@ -289,20 +277,23 @@ export class Agent {
           });
           return;
         }
+        // Wait for the awkward deadline if we sent the last message.
         if (conversation.lastMessage.author === player.id) {
           const awkwardDeadline = conversation.lastMessage.timestamp + AWKWARD_CONVERSATION_TIMEOUT;
           if (now < awkwardDeadline) {
             return;
           }
         }
+        // Wait for a cooldown after the last message to simulate "reading" the message.
         const messageCooldown = conversation.lastMessage.timestamp + MESSAGE_COOLDOWN;
         if (now < messageCooldown) {
           return;
         }
-        console.log(`${player.id} continuing conversation with ${otherPlayer.id}.`);
+        // Grab the lock and send a message!
+        // console.log(`${player.id} continuing conversation with ${otherPlayer.id}.`);
         const messageUuid = crypto.randomUUID();
         conversation.setIsTyping(now, player, messageUuid);
-        this.startOperation(game, now, 'agentGenerateMessage', {
+        this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
           worldId: game.worldId,
           playerId: player.id,
           agentId: this.id,
@@ -320,6 +311,7 @@ export class Agent {
     game: Game,
     now: number,
     name: Name,
+    type: 'agent' | 'player',
     args: Omit<FunctionArgs<AgentOperations[Name]>, 'operationId'>,
   ) {
     if (this.inProgressOperation) {
@@ -328,8 +320,8 @@ export class Agent {
       );
     }
     const operationId = game.allocId('operations');
-    console.log(`Agent ${this.id} starting operation ${name} (${operationId})`);
-    game.scheduleOperation(name, { operationId, ...args } as any);
+    // console.debug(`Agent ${this.id} starting operation ${name} (${operationId})`);
+    game.scheduleOperation(name, type, { operationId, ...args } as any);
     this.inProgressOperation = {
       name,
       operationId,

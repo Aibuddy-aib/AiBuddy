@@ -11,7 +11,7 @@ import {
 } from '../agent/conversation';
 import { assertNever } from '../util/assertNever';
 import { serializedAgent } from './agent';
-import { ACTIVITIES, ACTIVITY_COOLDOWN, CONVERSATION_COOLDOWN } from '../constants';
+import { ACTIVITIES } from '../constants';
 import { api, internal } from '../_generated/api';
 import { sleep } from '../util/sleep';
 import { serializedPlayer } from './player';
@@ -44,6 +44,18 @@ export const agentRememberConversation = internalAction({
   },
 });
 
+async function withTimeout<T>(
+  promise: Promise<T>, 
+  timeoutMs: number, 
+  errorMessage: string
+): Promise<T> {
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+  });
+  
+  return Promise.race([promise, timeoutPromise]);
+}
+
 export const agentGenerateMessage = internalAction({
   args: {
     worldId: v.id('worlds'),
@@ -70,13 +82,23 @@ export const agentGenerateMessage = internalAction({
       default:
         assertNever(args.type);
     }
-    const text = await completionFn(
-      ctx,
-      args.worldId,
-      args.conversationId as GameId<'conversations'>,
-      args.playerId as GameId<'players'>,
-      args.otherPlayerId as GameId<'players'>,
-    );
+    let text: string;
+    try {
+      text = await withTimeout(
+        completionFn(
+          ctx,
+          args.worldId,
+          args.conversationId as GameId<'conversations'>,
+          args.playerId as GameId<'players'>,
+          args.otherPlayerId as GameId<'players'>,
+        ),
+        3000,
+        'AI model API return timeout'
+      );
+    } catch (error: any) {
+      console.log(`AI conversation timeout: ${error.message}`);
+      text = "Sorry, I'm a little busy right now. Let's talk later.";
+    }
 
     await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
       worldId: args.worldId,
@@ -103,17 +125,16 @@ export const agentDoSomething = internalAction({
   handler: async (ctx, args) => {
     const { player, agent, otherFreePlayers } = args;
     const map = new WorldMap(args.map);
-    const now = Date.now();
 
     try {
-      // 简单延迟，避免所有代理同时行动
+      // simple delay, avoid all agents acting at the same time
       const totalDelay = 500 + Math.random() * 1000;
-      console.log(`代理 ${agent.name || agent.id} 等待 ${totalDelay.toFixed(0)}ms 后行动...`);
+      console.log(`Agent ${agent.name || agent.id} waiting ${totalDelay.toFixed(0)}ms before action...`);
       await sleep(totalDelay);
       
-      // 大幅降低对话概率到10%，让角色更少交流，更多分散
+      // significantly reduce conversation probability to 10%, make characters less talkative, more dispersed
       if (otherFreePlayers.length > 0 && Math.random() < 0.2) {
-        // 计算所有其他自由玩家与当前玩家的距离
+        // calculate distance between all other free players and current player
         const playersWithDistance = otherFreePlayers.map(otherPlayer => {
           const dist = Math.sqrt(
             Math.pow(player.position.x - otherPlayer.position.x, 2) + 
@@ -122,36 +143,36 @@ export const agentDoSomething = internalAction({
           return { player: otherPlayer, distance: dist };
         });
         
-        // 按距离排序
+        // sort by distance
         playersWithDistance.sort((a, b) => a.distance - b.distance);
         
-        // 选择最近的玩家进行对话
-        // 如果距离超过20个单位，则有50%概率选择随机玩家而不是最近的
-        // 这样可以增加一些随机性，避免角色总是找同一个人对话
+        // select the nearest player for conversation
+        // if distance is more than 20 units, there is a 50% chance to select a random player instead of the nearest one
+        // this can add some randomness, avoid characters always talking to the same person
         let selectedPlayer;
         if (playersWithDistance[0].distance > 30 && Math.random() < 0.3) {
           const randomIndex = Math.floor(Math.random() * playersWithDistance.length);
           selectedPlayer = playersWithDistance[randomIndex].player;
-          console.log(`代理 ${agent.name || agent.id} 距离最近的玩家太远(${playersWithDistance[0].distance.toFixed(2)}单位)，随机选择了玩家 ${selectedPlayer.id}`);
+          console.log(`Agent ${agent.name || agent.id} too far from the nearest player (${playersWithDistance[0].distance.toFixed(2)} units), randomly selected player ${selectedPlayer.id}`);
         } else {
           selectedPlayer = playersWithDistance[0].player;
-          console.log(`代理 ${agent.name || agent.id} 选择了最近的玩家 ${selectedPlayer.id}，距离: ${playersWithDistance[0].distance.toFixed(2)}单位`);
+          console.log(`Agent ${agent.name || agent.id} selected the nearest player ${selectedPlayer.id}, distance: ${playersWithDistance[0].distance.toFixed(2)} units`);
         }
         
-        // 检查距离，如果超过10个单位，先移动靠近对方
+        // check distance, if it's more than 10 units, move closer to the other player first
         const distance = Math.sqrt(
           Math.pow(player.position.x - selectedPlayer.position.x, 2) + 
           Math.pow(player.position.y - selectedPlayer.position.y, 2)
         );
         
         if (distance > 10) {
-          // 如果距离太远，先移动到对方附近
+          // if distance is too far, move closer to the other player first
           const midpoint = {
             x: Math.floor((player.position.x + selectedPlayer.position.x) / 2),
             y: Math.floor((player.position.y + selectedPlayer.position.y) / 2)
           };
           
-          console.log(`代理 ${agent.name || agent.id} 移动靠近 ${selectedPlayer.id} 后再发起对话，当前距离: ${distance.toFixed(2)}单位`);
+          console.log(`Agent ${agent.name || agent.id} moved closer to ${selectedPlayer.id} before initiating conversation, current distance: ${distance.toFixed(2)} units`);
           
           await ctx.runMutation(api.aiTown.main.sendInput, {
             worldId: args.worldId,
@@ -165,8 +186,7 @@ export const agentDoSomething = internalAction({
           return;
         }
         
-        // 距离足够近，可以发起对话
-        console.log(`代理 ${agent.name || agent.id} 邀请 ${selectedPlayer.id} 进行对话，当前距离: ${distance.toFixed(2)}单位`);
+        console.log(`Agent ${agent.name || agent.id} invited ${selectedPlayer.id} for conversation, current distance: ${distance.toFixed(2)} units`);
         await ctx.runMutation(api.aiTown.main.sendInput, {
           worldId: args.worldId,
           name: 'finishDoSomething',
@@ -178,13 +198,13 @@ export const agentDoSomething = internalAction({
         });
         return;
       }
-      // 降低活动概率到20%，增加随机移动的可能性
+      // reduce activity probability to 20%, increase the chance of random movement
       else if (Math.random() < 0.2) {
-        // 选择随机活动
+        // select random activity
         const activity = ACTIVITIES[Math.floor(Math.random() * ACTIVITIES.length)];
-        console.log(`代理 ${agent.name || agent.id} 开始${activity.description}活动 ${activity.emoji}`);
+        console.log(`Agent ${agent.name || agent.id} started ${activity.description} activity ${activity.emoji}`);
         
-        // 计算活动结束时间
+        // calculate activity duration
         const duration = activity.duration + Math.floor(Math.random() * 1000);
         const until = Date.now() + duration;
         
@@ -197,17 +217,16 @@ export const agentDoSomething = internalAction({
             activity: {
               description: activity.description,
               emoji: activity.emoji,
-              until: until, // 使用until字段而不是duration
+              until: until, // use until field instead of duration
             },
           },
         });
         return;
       }
-      // 增加到70%概率执行随机移动，大幅提高分散可能性
+      // increase the chance of random movement to 70%, significantly increase the chance of dispersion
       else {
-        // 如果不对话，则随机移动
+        // if no conversation, move randomly
         const destination = getRandomDestination(map, agent.id);
-        console.log(`代理 ${agent.name || agent.id} 移动到位置: (${destination.x}, ${destination.y})`);
         
         try {
           await ctx.runMutation(api.aiTown.main.sendInput, {
@@ -220,10 +239,10 @@ export const agentDoSomething = internalAction({
             },
           });
         } catch (error) {
-          console.error(`代理 ${agent.name || agent.id} 发送移动指令时出错:`, error);
+          console.error(`Agent ${agent.name || agent.id} failed to send movement command:`, error);
           await sleep(500);
           
-          // 简化的重试逻辑
+          // simplified retry logic
           try {
             await ctx.runMutation(api.aiTown.main.sendInput, {
               worldId: args.worldId,
@@ -235,32 +254,32 @@ export const agentDoSomething = internalAction({
               },
             });
           } catch (retryError) {
-            console.error(`代理 ${agent.name || agent.id} 重试失败`);
+            console.error(`Agent ${agent.name || agent.id} failed to retry`);
           }
         }
       }
     } catch (error) {
-      console.error(`代理 ${agent.name || agent.id} 行动过程中出错:`, error);
+      console.error(`Agent ${agent.name || agent.id} encountered an error during action:`, error);
     }
   },
 });
 
-// 加强版随机目的地选择器，极大促进角色分散
+// enhanced random destination selector, greatly promote character dispersion
 function getRandomDestination(worldMap: WorldMap, agentId: string): Point {
-  // 解析代理ID为数字，用作随机种子
+  // parse agent ID as number, used as random seed
   const agentIdNum = parseInt(agentId.split("_")[1] || "0", 10) || 0;
   
-  // 随机决定行为类型 - 增加分散行为的权重
+  // random decision on behavior type - increase the weight of dispersion behavior
   const behaviorRoll = Math.random();
   
-  // 增加到85%的概率执行强分散行为
+  // increase the chance of strong dispersion behavior to 85%
   if (behaviorRoll < 0.85) {
-    // 强力分散策略
+    // strong dispersion strategy
     const distanceStrategy = Math.random();
     
-    // 选择地图角落位置 (35%的概率)
+    // select map corner position (35% probability)
     if (distanceStrategy < 0.35) {
-      // 为确保最大分散效果，选择地图四角
+      // to ensure maximum dispersion effect, select map corners
       const farCorners = [
         { x: 2 + Math.floor(Math.random() * 3), y: 2 + Math.floor(Math.random() * 3) },
         { x: 2 + Math.floor(Math.random() * 3), y: worldMap.height - 5 + Math.floor(Math.random() * 3) },
@@ -268,13 +287,13 @@ function getRandomDestination(worldMap: WorldMap, agentId: string): Point {
         { x: worldMap.width - 5 + Math.floor(Math.random() * 3), y: worldMap.height - 5 + Math.floor(Math.random() * 3) }
       ];
       
-      // 使用代理ID来确定角色倾向的角落
-      // 这确保了同样的角色总是倾向于去同一个角落，而不同角色去不同角落
+      // use agent ID to determine the preferred corner
+      // this ensures that the same character always tends to go to the same corner, while different characters go to different corners
       const preferredCornerIndex = agentIdNum % 4;
-      // 但仍有30%概率去其他角落，增加随机性
+      // but there is still a 30% chance to go to other corners, increase randomness
       const cornerIndex = Math.random() < 0.7 ? preferredCornerIndex : Math.floor(Math.random() * 4);
       
-      // 在选定角落附近随机选择位置，增加随机偏移
+      // randomly select a position near the selected corner, increase random offset
       const corner = farCorners[cornerIndex];
       const offsetX = Math.floor(Math.random() * 5) * (Math.random() < 0.5 ? 1 : -1);
       const offsetY = Math.floor(Math.random() * 5) * (Math.random() < 0.5 ? 1 : -1);
@@ -282,84 +301,81 @@ function getRandomDestination(worldMap: WorldMap, agentId: string): Point {
       const x = Math.max(1, Math.min(worldMap.width - 2, corner.x + offsetX));
       const y = Math.max(1, Math.min(worldMap.height - 2, corner.y + offsetY));
       
-      console.log(`代理 ${agentId} 选择了角落位置: (${x}, ${y})`);
       return { x, y };
     }
     
-    // 选择地图边缘 (30%的概率)
+    // select map edge (30% probability)
     else if (distanceStrategy < 0.65) {
-      // 使用代理ID选择倾向的边缘
+      // use agent ID to determine the preferred edge
       const preferredSide = agentIdNum % 4;
-      // 但仍有20%概率去其他边缘
+      // but there is still a 20% chance to go to other edges
       const chooseSide = Math.random() < 0.8 ? preferredSide : Math.floor(Math.random() * 4);
       
       let x, y;
       
       if (chooseSide === 0) {
-        // 上边缘 - 距离边缘1-3格，避免完全贴边
+        // top edge - distance from edge 1-3 tiles, avoid completely touching the edge
         x = 3 + Math.floor(Math.random() * (worldMap.width - 6));
         y = 2 + Math.floor(Math.random() * 3);
       } else if (chooseSide === 1) {
-        // 右边缘
+        // right edge
         x = worldMap.width - 5 + Math.floor(Math.random() * 3);
         y = 3 + Math.floor(Math.random() * (worldMap.height - 6));
       } else if (chooseSide === 2) {
-        // 下边缘
+        // bottom edge
         x = 3 + Math.floor(Math.random() * (worldMap.width - 6));
         y = worldMap.height - 5 + Math.floor(Math.random() * 3);
       } else {
-        // 左边缘
+        // left edge
         x = 2 + Math.floor(Math.random() * 3);
         y = 3 + Math.floor(Math.random() * (worldMap.height - 6));
       }
       
-      // 增加随机偏移，使角色不会都停在一条线上
+      // increase random offset, avoid characters all staying on the same line
       const offsetX = Math.floor(Math.random() * 3) * (Math.random() < 0.5 ? 1 : -1);
       const offsetY = Math.floor(Math.random() * 3) * (Math.random() < 0.5 ? 1 : -1);
       
       x = Math.max(1, Math.min(worldMap.width - 2, x + offsetX));
       y = Math.max(1, Math.min(worldMap.height - 2, y + offsetY));
       
-      console.log(`代理 ${agentId} 选择了边缘位置: (${x}, ${y})`);
       return { x, y };
     }
     
-    // 选择专属区域 (35%的概率) - 这是最强的分散策略
+    // select exclusive area (35% probability) - this is the strongest dispersion strategy
     else {
-      // 将地图分成更多更细的区域，增加分散程度
-      const gridSize = 15; // 增加到15x15的网格
+      // divide the map into more and more fine areas, increase dispersion
+      const gridSize = 15; // increase to 15x15 grid
       
-      // 使用代理ID来确定一个固定的唯一区域
-      // 使用质数17作为乘数增加伪随机性
+      // use agent ID to determine a fixed unique area
+      // use prime number 17 as multiplier to increase pseudo-randomness
       const uniqueAreaIndex = (agentIdNum * 17) % (gridSize * gridSize);
       const areaX = uniqueAreaIndex % gridSize;
       const areaY = Math.floor(uniqueAreaIndex / gridSize);
       
-      // 计算区域的边界
+      // calculate the boundaries of the area
       const cellWidth = Math.floor(worldMap.width / gridSize);
       const cellHeight = Math.floor(worldMap.height / gridSize);
       
-      // 计算该区域边界，比前版本更精确
+      // calculate the boundaries of the area, more precise than the previous version
       const minX = Math.max(1, areaX * cellWidth);
       const maxX = Math.min(worldMap.width - 2, (areaX + 1) * cellWidth - 1);
       const minY = Math.max(1, areaY * cellHeight);
       const maxY = Math.min(worldMap.height - 2, (areaY + 1) * cellHeight - 1);
       
-      // 为避免角色聚集在区域中心，使用均匀随机分布
+      // to avoid characters gathering in the center of the area, use uniform random distribution
       const x = minX + Math.floor(Math.random() * (maxX - minX + 1));
       const y = minY + Math.floor(Math.random() * (maxY - minY + 1));
       
-      console.log(`代理 ${agentId} 选择了专属区域 (${areaX},${areaY}) 中的位置: (${x}, ${y})`);
       return { x, y };
     }
   }
   
-  // 偶尔随机漫步 (10%概率)
+  // occasionally wander (10% probability)
   else if (behaviorRoll < 0.95) {
-    // 避免选择地图中心区域（通常是人群聚集处）
-    // 而是选择中等距离随机位置
+    // avoid selecting the center of the map (usually where people gather)
+    // instead, select a random position at a medium distance
     
-    // 确定四个区域象限
+    // determine the four quadrants of the map
     const quadrants = [
       { minX: 1, maxX: worldMap.width / 2 - 1, minY: 1, maxY: worldMap.height / 2 - 1 },
       { minX: worldMap.width / 2, maxX: worldMap.width - 2, minY: 1, maxY: worldMap.height / 2 - 1 },
@@ -367,26 +383,25 @@ function getRandomDestination(worldMap: WorldMap, agentId: string): Point {
       { minX: worldMap.width / 2, maxX: worldMap.width - 2, minY: worldMap.height / 2, maxY: worldMap.height - 2 }
     ];
     
-    // 选择一个象限，使用代理ID增加偏好
+    // select a quadrant, use agent ID to increase preference
     const quadrantIndex = (agentIdNum + Math.floor(Math.random() * 2)) % 4;
     const quadrant = quadrants[quadrantIndex];
     
-    // 在象限内随机选择位置
+    // randomly select a position in the quadrant
     const x = Math.floor(quadrant.minX + Math.random() * (quadrant.maxX - quadrant.minX));
     const y = Math.floor(quadrant.minY + Math.random() * (quadrant.maxY - quadrant.minY));
     
-    console.log(`代理 ${agentId} 选择了象限 ${quadrantIndex} 中的随机位置: (${x}, ${y})`);
     return { x, y };
   }
   
-  // 极少情况下回到自己的"家"区域 (5%概率)
+  // rarely return to their "home" area (5% probability)
   else {
-    // 每个代理都有一个固定的"家"区域
-    // 使用代理ID确定一个固定的区域
-    const homeX = (agentIdNum * 7) % 5; // 将地图水平分为5个区域
-    const homeY = (agentIdNum * 11) % 5; // 将地图垂直分为5个区域
+    // each agent has a fixed "home" area
+    // use agent ID to determine a fixed area
+    const homeX = (agentIdNum * 7) % 5; // divide the map into 5 horizontal areas
+    const homeY = (agentIdNum * 11) % 5; // divide the map into 5 vertical areas
     
-    // 计算家区域的边界
+    // calculate the boundaries of the home area
     const homeWidth = Math.floor(worldMap.width / 5);
     const homeHeight = Math.floor(worldMap.height / 5);
     
@@ -395,11 +410,18 @@ function getRandomDestination(worldMap: WorldMap, agentId: string): Point {
     const minY = Math.max(1, homeY * homeHeight + 2);
     const maxY = Math.min(worldMap.height - 2, (homeY + 1) * homeHeight - 2);
     
-    // 在家区域内随机选择位置
+    // randomly select a position in the home area
     const x = Math.floor(minX + Math.random() * (maxX - minX));
     const y = Math.floor(minY + Math.random() * (maxY - minY));
     
-    console.log(`代理 ${agentId} 返回了家区域 (${homeX},${homeY}): (${x}, ${y})`);
     return { x, y };
   }
+}
+
+function wanderDestination(worldMap: WorldMap) {
+  // Wander someonewhere at least one tile away from the edge.
+  return {
+    x: 1 + Math.floor(Math.random() * (worldMap.width - 2)),
+    y: 1 + Math.floor(Math.random() * (worldMap.height - 2)),
+  };
 }
