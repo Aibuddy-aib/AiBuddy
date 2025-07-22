@@ -8,6 +8,205 @@ import { GameId } from '../aiTown/ids';
 import { Player } from '../aiTown/player';
 import { WorldMap } from '../aiTown/worldMap';
 
+interface CachedPath {
+  path: Path;
+  newDestination?: Point;
+  timestamp: number;
+}
+
+class PathCache {
+  private cache = new Map<string, CachedPath>();
+  private maxCacheSize = 500;
+  private cacheTimeout = 30000;
+  
+  getKey(start: Point, end: Point): string {
+    // use integer coordinates as cache key, reduce precision issues
+    const startX = Math.floor(start.x);
+    const startY = Math.floor(start.y);
+    const endX = Math.floor(end.x);
+    const endY = Math.floor(end.y);
+    return `${startX},${startY}-${endX},${endY}`;
+  }
+  
+  get(start: Point, end: Point): CachedPath | null {
+    const key = this.getKey(start, end);
+    const cached = this.cache.get(key);
+    
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached;
+    }
+    
+    if (cached) {
+      this.cache.delete(key);
+    }
+    
+    return null;
+  }
+  
+  set(start: Point, end: Point, result: { path: Path; newDestination?: Point }): void {
+    const key = this.getKey(start, end);
+    
+    if (this.cache.size >= this.maxCacheSize) {
+      this.cleanup();
+    }
+    
+    this.cache.set(key, {
+      ...result,
+      timestamp: Date.now(),
+    });
+  }
+  
+  private cleanup(): void {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+    
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > this.cacheTimeout) {
+        keysToDelete.push(key);
+      }
+    }
+    
+    for (const key of keysToDelete) {
+      this.cache.delete(key);
+    }
+    
+    if (this.cache.size >= this.maxCacheSize) {
+      const entries = Array.from(this.cache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      
+      const toDelete = entries.slice(0, Math.floor(this.maxCacheSize * 0.2)); // delete 20% of old entries
+      for (const [key] of toDelete) {
+        this.cache.delete(key);
+      }
+    }
+  }
+  
+  getStats(): { size: number; maxSize: number } {
+    return {
+      size: this.cache.size,
+      maxSize: this.maxCacheSize,
+    };
+  }
+}
+
+const pathCache = new PathCache();
+
+class ObstacleGridCache {
+  private cache = new Map<string, number[][]>();
+  private stats = {
+    hits: 0,
+    misses: 0,
+    totalTime: 0,
+  };
+  
+  getGrid(worldMap: WorldMap): number[][] {
+    const startTime = Date.now();
+    
+    const mapKey = this.generateMapKey(worldMap);
+    
+    if (this.cache.has(mapKey)) {
+      this.stats.hits++;
+      return this.cache.get(mapKey)!;
+    }
+    
+    this.stats.misses++;
+    
+    const grid: number[][] = [];
+    for (let y = 0; y < worldMap.height; y++) {
+      grid[y] = [];
+      for (let x = 0; x < worldMap.width; x++) {
+        const isBlocked = simplifiedBlockedCheck({ x, y }, [], worldMap);
+        grid[y][x] = isBlocked ? 1 : 0; // 1=blocked, 0=walkable
+      }
+    }
+    
+    this.cache.set(mapKey, grid);
+    
+    const endTime = Date.now();
+    this.stats.totalTime += (endTime - startTime);
+    
+    return grid;
+  }
+  
+  private generateMapKey(worldMap: WorldMap): string {
+    const features = {
+      width: worldMap.width,
+      height: worldMap.height,
+      bgLayers: worldMap.bgTiles.length,
+      objLayers: worldMap.objectTiles.length,
+    };
+    return JSON.stringify(features);
+  }
+  
+  clear(): void {
+    this.cache.clear();
+    this.stats = { hits: 0, misses: 0, totalTime: 0 };
+  }
+  
+  getStats(): { hits: number; misses: number; cacheSize: number; averageTime: number } {
+    const totalCalls = this.stats.hits + this.stats.misses;
+    return {
+      hits: this.stats.hits,
+      misses: this.stats.misses,
+      cacheSize: this.cache.size,
+      averageTime: totalCalls > 0 ? this.stats.totalTime / totalCalls : 0,
+    };
+  }
+}
+
+const obstacleGridCache = new ObstacleGridCache();
+
+// debug function: get path cache stats
+export function getPathCacheStats(): { size: number; maxSize: number } {
+  return pathCache.getStats();
+}
+
+// debug function: clear path cache
+export function clearPathCache(): void {
+  // recreate cache instance to clear all caches
+  Object.assign(pathCache, new PathCache());
+  console.log('Path cache cleared');
+}
+
+// debug function: get obstacle grid cache stats
+export function getObstacleGridCacheStats(): { hits: number; misses: number; cacheSize: number; averageTime: number } {
+  return obstacleGridCache.getStats();
+}
+
+// debug function: clear obstacle grid cache
+export function clearObstacleGridCache(): void {
+  obstacleGridCache.clear();
+  console.log('Obstacle grid cache cleared');
+}
+
+// performance monitoring: record pathfinding stats
+let pathfindingStats = {
+  totalCalls: 0,
+  cacheHits: 0,
+  cacheMisses: 0,
+  totalTime: 0,
+  maxIterationsReached: 0,
+};
+
+export function getPathfindingStats() {
+  return {
+    ...pathfindingStats,
+    averageTime: pathfindingStats.totalCalls > 0 ? pathfindingStats.totalTime / pathfindingStats.totalCalls : 0,
+    cacheHitRate: pathfindingStats.totalCalls > 0 ? pathfindingStats.cacheHits / pathfindingStats.totalCalls : 0,
+  };
+}
+
+export function resetPathfindingStats() {
+  pathfindingStats = {
+    totalCalls: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
+    totalTime: 0,
+    maxIterationsReached: 0,
+  };
+  console.log('Pathfinding stats reset');
+}
+
 type PathCandidate = {
   position: Point;
   facing?: Vector;
@@ -52,13 +251,37 @@ export function movePlayer(
   return;
 }
 
+// optimized findRoute function - improved heuristic function, added search limits and path caching
 export function findRoute(
   game: Game,
   now: number,
   player: Player,
   destination: Point,
 ): { path: Path; newDestination?: Point } | null {
-  const minDistances: PathCandidate[][] = [];
+  const startTime = Date.now();
+  pathfindingStats.totalCalls++;
+  
+  // check path cache
+  const cached = pathCache.get(player.position, destination);
+  if (cached) {
+    pathfindingStats.cacheHits++;
+    console.log(`Path cache hit for ${player.id}: ${player.position.x},${player.position.y} -> ${destination.x},${destination.y}`);
+    return cached;
+  }
+  
+  pathfindingStats.cacheMisses++;
+  
+  // use Map instead of 2D array, improve memory efficiency
+  const minDistances = new Map<string, PathCandidate>();
+  
+  // improved heuristic function: diagonal distance + difference between straight distance
+  const improvedHeuristic = (pos: Point, dest: Point): number => {
+    const dx = Math.abs(pos.x - dest.x);
+    const dy = Math.abs(pos.y - dest.y);
+    // diagonal distance + difference between straight distance, more precise than Manhattan distance
+    return Math.max(dx, dy) + (Math.sqrt(2) - 1) * Math.min(dx, dy);
+  };
+  
   const explore = (current: PathCandidate): Array<PathCandidate> => {
     const { x, y } = current.position;
     const neighbors = [];
@@ -76,6 +299,7 @@ export function findRoute(
       );
     }
     if (x === Math.floor(x) && y === Math.floor(y)) {
+      // 4-direction movement (original logic)
       neighbors.push(
         { position: { x: x + 1, y }, facing: { dx: 1, dy: 0 } },
         { position: { x: x - 1, y }, facing: { dx: -1, dy: 0 } },
@@ -90,7 +314,8 @@ export function findRoute(
       if (blocked(game, now, position, player.id)) {
         continue;
       }
-      const remaining = manhattanDistance(position, destination);
+      // use improved heuristic function instead of Manhattan distance
+      const remaining = improvedHeuristic(position, destination);
       const path = {
         position,
         facing,
@@ -99,12 +324,13 @@ export function findRoute(
         cost: length + remaining,
         prev: current,
       };
-      const existingMin = minDistances[position.y]?.[position.x];
+      // use Map's key instead of 2D array index
+      const key = `${position.x},${position.y}`;
+      const existingMin = minDistances.get(key);
       if (existingMin && existingMin.cost <= path.cost) {
         continue;
       }
-      minDistances[position.y] ??= [];
-      minDistances[position.y][position.x] = path;
+      minDistances.set(key, path);
       next.push(path);
     }
     return next;
@@ -117,18 +343,25 @@ export function findRoute(
     facing: player.facing,
     t: now,
     length: 0,
-    cost: manhattanDistance(startingPosition, destination),
+    cost: improvedHeuristic(startingPosition, destination),
     prev: undefined,
   };
   let bestCandidate = current;
   const minheap = MinHeap<PathCandidate>((p0, p1) => p0.cost > p1.cost);
-  while (current) {
+  
+  // add search limits to prevent infinite search
+  let iterations = 0;
+  const maxIterations = 2000; // maximum search iterations
+  
+  while (current && iterations < maxIterations) {
+    iterations++;
+    
     if (pointsEqual(current.position, destination)) {
       break;
     }
     if (
-      manhattanDistance(current.position, destination) <
-      manhattanDistance(bestCandidate.position, destination)
+      improvedHeuristic(current.position, destination) <
+      improvedHeuristic(bestCandidate.position, destination)
     ) {
       bestCandidate = current;
     }
@@ -137,6 +370,13 @@ export function findRoute(
     }
     current = minheap.pop();
   }
+  
+  // if max iterations reached, record warning
+  if (iterations >= maxIterations) {
+    pathfindingStats.maxIterationsReached++;
+    console.warn(`Pathfinding reached max iterations (${maxIterations}) for ${player.name} to ${JSON.stringify(destination)}`);
+  }
+  
   let newDestination: Point | undefined = undefined;
   if (!current) {
     if (bestCandidate.length === 0) {
@@ -154,43 +394,51 @@ export function findRoute(
   }
   densePath.reverse();
 
-  return { path: compressPath(densePath), newDestination };
+  const result = { path: compressPath(densePath), newDestination };
+  
+  // cache path result
+  pathCache.set(player.position, destination, result);
+  
+  // record performance stats
+  const endTime = Date.now();
+  pathfindingStats.totalTime += (endTime - startTime);
+  
+  return result;
 }
 
-// 简化的障碍检测，检查边界、玩家碰撞和图层限制
+// simplified blocked check, check boundaries, player collisions and layer limits
 function simplifiedBlockedCheck(position: Point, otherPositions: Point[], map: WorldMap) {
-  // 检查边界
+  // check boundaries
   if (position.x < 0 || position.y < 0 || position.x >= map.width || position.y >= map.height) {
     return "out of bounds";
   }
   
-  // 检查玩家碰撞
+  // check player collisions
   for (const otherPosition of otherPositions) {
     if (distance(otherPosition, position) < COLLISION_THRESHOLD) {
       return "player";
     }
   }
   
-  // 获取当前位置的整数坐标
+  // get integer coordinates of current position
   const x = Math.floor(position.x);
   const y = Math.floor(position.y);
   
-  // ===== 图层检查逻辑 =====
+  // ===== layer check logic =====
   
-  // 1. 检查对象图层(objectTiles)
-  // 我们只希望角色能在第一个对象图层(索引0)上移动，不能在其他对象图层(索引1-4)上移动
+  // 1. check object layer (objectTiles)
+  // we only want characters to move on the first object layer (index 0), not on other object layers (index 1-4)
   if (map.objectTiles.length > 1) {
-    // 检查第二个及以上对象图层是否有对象
+    // check if there are objects on the second and subsequent object layers
     for (let i = 1; i < map.objectTiles.length; i++) {
       if (map.objectTiles[i]?.[x]?.[y] !== undefined && map.objectTiles[i][x][y] !== -1) {
-        console.log(`阻止在位置(${x}, ${y})移动：该位置在第${i+1}个对象图层上`);
         return "wrong layer";
       }
     }
   }
   
-  // 2. 确保玩家在有效图层上
-  // 要么在背景图层(bgTiles)上有内容，要么在第一个对象图层(objectTiles[0])上有内容
+  // 2. ensure player is on a valid layer
+  // either there is content on the background layer (bgTiles), or there is content on the first object layer (objectTiles[0])
   const isOnBgLayer = map.bgTiles.length > 0 && 
                      map.bgTiles[0]?.[x]?.[y] !== undefined && 
                      map.bgTiles[0][x][y] !== -1;
@@ -199,53 +447,52 @@ function simplifiedBlockedCheck(position: Point, otherPositions: Point[], map: W
                            map.objectTiles[0]?.[x]?.[y] !== undefined && 
                            map.objectTiles[0][x][y] !== -1;
   
-  // 如果既不在背景图层也不在第一个对象图层上，则阻止移动
+  // if not on background layer and not on first object layer, block movement
   if (!isOnBgLayer && !isOnFirstObjLayer) {
-    console.log(`阻止在位置(${x}, ${y})移动：该位置不在允许的图层上`);
     return "no valid layer";
   }
   
-  // 所有检查通过，允许移动
+  // all checks passed, allow movement
   return null;
 }
 
-// 寻找最近的有效位置
+// find nearest valid position
 export function findNearestValidPosition(game: Game, position: Point, playerId?: GameId<'players'>): Point | null {
   const map = game.worldMap;
   const startX = Math.floor(position.x);
   const startY = Math.floor(position.y);
   
-  // 初始检查当前位置
+  // initial check current position
   if (!simplifiedBlockedCheck(position, [], map)) {
     return position;
   }
   
-  // 按距离搜索最近的合法位置
-  const maxSearchDistance = 20; // 最大搜索半径
+  // search nearest valid position by distance
+  const maxSearchDistance = 20; // maximum search radius
   const visited = new Set<string>();
   const queue: Array<{x: number, y: number, distance: number}> = [];
   
-  // 添加起始点到队列
+  // add starting point to queue
   queue.push({x: startX, y: startY, distance: 0});
   visited.add(`${startX},${startY}`);
   
   while (queue.length > 0) {
     const {x, y, distance} = queue.shift()!;
     
-    // 超出最大搜索距离，放弃
+    // if beyond max search distance, give up
     if (distance > maxSearchDistance) {
-      console.log(`无法找到有效位置，超出最大搜索距离`);
+      console.log(`can't find valid position, beyond max search distance`);
       return null;
     }
     
-    // 检查当前位置是否有效
+    // check if current position is valid
     const currentPos = {x, y};
     if (!simplifiedBlockedCheck(currentPos, [], map)) {
-      console.log(`找到有效位置: (${x}, ${y}), 原位置: (${startX}, ${startY})`);
+      console.log(`found valid position: (${x}, ${y}), original position: (${startX}, ${startY})`);
       return currentPos;
     }
     
-    // 检查相邻位置
+    // check adjacent positions
     const directions = [
       {dx: 1, dy: 0}, {dx: -1, dy: 0}, 
       {dx: 0, dy: 1}, {dx: 0, dy: -1}
@@ -256,7 +503,7 @@ export function findNearestValidPosition(game: Game, position: Point, playerId?:
       const newY = y + dy;
       const key = `${newX},${newY}`;
       
-      // 如果位置有效且未访问过
+      // if position is valid and not visited
       if (newX >= 0 && newY >= 0 && newX < map.width && newY < map.height && !visited.has(key)) {
         queue.push({x: newX, y: newY, distance: distance + 1});
         visited.add(key);
@@ -264,20 +511,20 @@ export function findNearestValidPosition(game: Game, position: Point, playerId?:
     }
   }
   
-  console.log(`无法找到有效位置`);
+  console.log(`can't find valid position`);
   return null;
 }
 
-// 处理被卡住的角色
+// handle stuck player
 export function rescueStuckPlayer(game: Game, now: number, player: Player) {
-  console.log(`尝试救援被卡住的角色 ${player.id} 从位置 (${player.position.x}, ${player.position.y})`);
+  console.log(`trying to rescue stuck player ${player.id} from position (${player.position.x}, ${player.position.y})`);
   
-  // 寻找最近的有效位置
+  // find nearest valid position
   const validPosition = findNearestValidPosition(game, player.position, player.id);
   
   if (validPosition) {
-    // 直接设置玩家位置，跳过寻路
-    console.log(`将角色 ${player.id} 传送到有效位置 (${validPosition.x}, ${validPosition.y})`);
+    // directly set player position, skip pathfinding
+    console.log(`moving player ${player.id} to valid position (${validPosition.x}, ${validPosition.y})`);
     player.position = validPosition;
     player.speed = 0;
     delete player.pathfinding;
@@ -288,16 +535,16 @@ export function rescueStuckPlayer(game: Game, now: number, player: Player) {
 }
 
 export function blocked(game: Game, now: number, pos: Point, playerId?: GameId<'players'>) {
-  // 获取其他玩家的位置，用于碰撞检测
+  // get other players' positions, for collision detection
   const otherPositions = [...game.world.players.values()]
     .filter((p) => p.id !== playerId)
     .map((p) => p.position);
   
-  // 使用改进后的simplifiedBlockedCheck函数，它现在包含了图层检查
+  // use improved simplifiedBlockedCheck function, it now includes layer checks
   return simplifiedBlockedCheck(pos, otherPositions, game.worldMap);
 }
 
-// 保持函数接口一致，但使用我们改进的图层检查逻辑
+// keep function interface consistent, but use our improved layer check logic
 export function blockedWithPositions(position: Point, otherPositions: Point[], map: WorldMap) {
   return simplifiedBlockedCheck(position, otherPositions, map);
 }

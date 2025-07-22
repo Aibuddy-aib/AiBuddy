@@ -523,7 +523,7 @@ export const playerInputs = {
       const player = game.world.players.get(playerId);
       if (!player) throw new Error(`Invalid player ID ${playerId}`);
       
-      // Check if player is in conversation or moving
+      // Check if player is in conversation (but allow working while moving)
       const conversation = [...game.world.conversations.values()].find((c) =>
         c.participants.has(player.id)
       );
@@ -532,24 +532,20 @@ export const playerInputs = {
         return { success: false, reason: "Cannot start working while in a conversation" };
       }
       
-      if (player.pathfinding) {
-        return { success: false, reason: "Cannot start working while moving" };
-      }
-      
-      // If a custom work start time is provided, use it
+      // If custom work start time is provided, use it
       if (args.workStartTime !== undefined) {
         player.workStartTime = args.workStartTime;
-        console.log(`Using provided work start time: ${new Date(args.workStartTime).toISOString()}`);
+        console.log(`use custom work start time: ${new Date(args.workStartTime).toISOString()}`);
       }
       
-      // Start working state
+      // Start work status
       const success = player.startWorking();
       
       // Set work activity, using saved start time or current time
       player.activity = {
         description: "Working",
         emoji: "👷",
-        until: (player.workStartTime || now) + 1000 * 60 * 60 * 8 // Calculate 8 hours from work start time
+        until: (player.workStartTime || now) + 1000 * 20 // 20 seconds from the start time of the job
       };
       
       // Also update isWorking status and workStartTime in PlayerDescription
@@ -559,16 +555,13 @@ export const playerInputs = {
         playerDesc.workStartTime = player.workStartTime;
         game.descriptionsModified = true;
       }
-      
-      // Sync token data to database
-      player.syncTokenToDatabase(game);
-      
+
       return { success };
     },
   }),
   stopWorking: inputHandler({
     args: { playerId: v.string() },
-    handler: (game, now, args) => {
+    handler: (game, _, args) => {
       const playerId = parseGameId('players', args.playerId);
       const player = game.world.players.get(playerId);
       if (!player) throw new Error(`Invalid player ID ${playerId}`);
@@ -589,7 +582,7 @@ export const playerInputs = {
       }
       
       // Sync token data to database
-      player.syncTokenToDatabase(game);
+      // player.syncTokenToDatabase(game);
       
       return { success };
     },
