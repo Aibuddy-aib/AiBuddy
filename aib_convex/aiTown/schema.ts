@@ -76,4 +76,16 @@ export const aiTownTables = {
     .index('edge', ['worldId', 'player1', 'player2', 'ended'])
     .index('conversation', ['worldId', 'player1', 'conversationId'])
     .index('playerHistory', ['worldId', 'player1', 'ended']),
+
+  // work complete record table
+  workCompleteRecords: defineTable({
+    worldId: v.id('worlds'),
+    playerId: v.string(),
+    workStartTime: v.number(),
+    workEndTime: v.optional(v.number()),
+    workReward: v.optional(v.number()),
+    skillReward: v.optional(v.number()),
+    createdAt: v.number(),
+    isRead: v.optional(v.boolean()), // add read flag
+  }).index('worldId', ['worldId']).index('playerId', ['worldId', 'playerId']),
 };

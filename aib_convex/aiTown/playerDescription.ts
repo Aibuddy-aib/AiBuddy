@@ -10,6 +10,7 @@ export const serializedPlayerDescription = {
   aibtoken: v.optional(v.number()),
   isWorking: v.optional(v.boolean()),
   workStartTime: v.optional(v.number()),
+  lastEventTime: v.optional(v.number()),
 };
 export type SerializedPlayerDescription = ObjectType<typeof serializedPlayerDescription>;
 
@@ -22,9 +23,10 @@ export class PlayerDescription {
   aibtoken?: number;
   isWorking?: boolean;
   workStartTime?: number;
+  lastEventTime?: number;
 
   constructor(serialized: SerializedPlayerDescription) {
-    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime } = serialized;
+    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = serialized;
     this.playerId = parseGameId('players', playerId);
     this.name = name;
     this.description = description;
@@ -33,10 +35,11 @@ export class PlayerDescription {
     this.aibtoken = aibtoken;
     this.isWorking = isWorking;
     this.workStartTime = workStartTime;
+    this.lastEventTime = lastEventTime;
   }
 
   serialize(): SerializedPlayerDescription {
-    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime } = this;
+    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = this;
     return {
       playerId,
       name,
@@ -46,6 +49,7 @@ export class PlayerDescription {
       aibtoken,
       isWorking,
       workStartTime,
+      lastEventTime,
     };
   }
 }
