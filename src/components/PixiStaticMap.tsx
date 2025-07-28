@@ -59,28 +59,28 @@ export const PixiStaticMap = PixiComponent('StaticMap', {
         // Some layers may not have tiles at this location.
         if (tileIndex === -1) continue;
         
-        // Tiled使用特殊的编码方式存储旋转和翻转信息
-        // 第32位（最高位）：水平翻转标志
-        // 第31位：垂直翻转标志
-        // 第30位：对角线翻转标志
-        // 第1-29位：实际的瓦片ID
+        // tiled uses special encoding to store rotation and flip information
+        // 32nd bit (highest bit): horizontal flip flag
+        // 31st bit: vertical flip flag
+        // 30th bit: diagonal flip flag
+        // 1-29th bits: actual tile ID
         const FLIPPED_HORIZONTALLY_FLAG = 0x80000000;
         const FLIPPED_VERTICALLY_FLAG   = 0x40000000;
         const FLIPPED_DIAGONALLY_FLAG   = 0x20000000;
         
         let actualTileIndex = tileIndex;
         
-        // 提取实际的瓦片ID（去掉旋转/翻转标志位）
+        // extract actual tile ID (remove rotation/flip flags)
         const flippedHorizontally = (tileIndex & FLIPPED_HORIZONTALLY_FLAG) !== 0;
         const flippedVertically = (tileIndex & FLIPPED_VERTICALLY_FLAG) !== 0;
         const flippedDiagonally = (tileIndex & FLIPPED_DIAGONALLY_FLAG) !== 0;
         
-        // 去除旋转/翻转标志位，获取实际的瓦片ID
+        // remove rotation/flip flags, get actual tile ID
         actualTileIndex = tileIndex & ~(FLIPPED_HORIZONTALLY_FLAG | FLIPPED_VERTICALLY_FLAG | FLIPPED_DIAGONALLY_FLAG);
         
-        // 确保瓦片ID在有效范围内
+        // ensure tile ID is within valid range
         if (actualTileIndex >= tiles.length) {
-          console.warn(`瓦片索引超出范围: ${actualTileIndex}, 原始值: ${tileIndex}`);
+          console.warn(`tile index out of range: ${actualTileIndex}, original value: ${tileIndex}`);
           continue;
         }
         
@@ -88,60 +88,60 @@ export const PixiStaticMap = PixiComponent('StaticMap', {
         ctile.x = xPx;
         ctile.y = yPx;
         
-        // 返回到最简单直接的方法
-        // 根据Tiled官方文档中的旋转和翻转标识
+        // return to the simplest and most direct method
+        // based on the rotation and flip flags in the Tiled official documentation
         
-        // 打印调试信息，帮助了解具体的旋转组合
+        // print debug information to help understand specific rotation combinations
         if (flippedHorizontally || flippedVertically || flippedDiagonally) {
-          console.log(`瓦片ID: ${actualTileIndex}, H:${flippedHorizontally}, V:${flippedVertically}, D:${flippedDiagonally}`);
+          console.log(`tile ID: ${actualTileIndex}, H:${flippedHorizontally}, V:${flippedVertically}, D:${flippedDiagonally}`);
         }
         
-        // 根据Tiled图块编辑器的旋转行为实现
-        // 首先处理对角线翻转 (等效于90度旋转并可能翻转)
+        // implement the rotation behavior of the Tiled tile editor
+        // first handle diagonal flip (equivalent to 90 degree rotation and possible flip)
         if (flippedDiagonally) {
           if (flippedHorizontally && flippedVertically) {
-            // D+H+V: 对角线+水平+垂直
+            // D+H+V: diagonal + horizontal + vertical
             ctile.anchor.set(0, 0);
-            ctile.rotation = -Math.PI / 2; // 改为-90度
+            ctile.rotation = -Math.PI / 2; // change to -90 degrees
             ctile.scale.x = -1;
             ctile.scale.y = -1;
             ctile.x = xPx;
             ctile.y = yPx + map.tileDim;
           } else if (flippedHorizontally) {
-            // D+H: 对角线+水平
+            // D+H: diagonal + horizontal
             ctile.anchor.set(0, 0);
-            ctile.rotation = Math.PI / 2; // 改为90度
+            ctile.rotation = Math.PI / 2; // change to 90 degrees
             ctile.x = xPx + map.tileDim;
             ctile.y = yPx;
           } else if (flippedVertically) {
-            // D+V: 对角线+垂直
+            // D+V: diagonal + vertical
             ctile.anchor.set(0, 0);
-            ctile.rotation = -Math.PI / 2; // 改为-90度
+            ctile.rotation = -Math.PI / 2; // change to -90 degrees
             ctile.x = xPx;
             ctile.y = yPx + map.tileDim;
           } else {
-            // 只有D: 对角线翻转
+            // only D: diagonal flip
             ctile.anchor.set(0, 0);
-            ctile.rotation = -Math.PI / 2; // 改为-90度
+            ctile.rotation = -Math.PI / 2; // change to -90 degrees
             ctile.x = xPx;
             ctile.y = yPx + map.tileDim;
           }
         } else {
-          // 没有对角线翻转，只处理简单的水平/垂直翻转
+          // no diagonal flip, only handle simple horizontal/vertical flip
           if (flippedHorizontally && flippedVertically) {
-            // H+V: 水平+垂直 (180度旋转)
+            // H+V: horizontal + vertical (180 degree rotation)
             ctile.anchor.set(0, 0);
             ctile.scale.x = -1;
             ctile.scale.y = -1;
             ctile.x = xPx + map.tileDim;
             ctile.y = yPx + map.tileDim;
           } else if (flippedHorizontally) {
-            // 只有H: 水平翻转
+            // only H: horizontal flip
             ctile.anchor.set(0, 0);
             ctile.scale.x = -1;
             ctile.x = xPx + map.tileDim;
           } else if (flippedVertically) {
-            // 只有V: 垂直翻转
+            // only V: vertical flip
             ctile.anchor.set(0, 0);
             ctile.scale.y = -1;
             ctile.y = yPx + map.tileDim;

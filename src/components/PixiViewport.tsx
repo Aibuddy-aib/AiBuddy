@@ -17,13 +17,13 @@ export type ViewportProps = {
   children?: ReactNode;
 };
 
-// 自定义类型，避免直接扩展Viewport接口
+// custom type to avoid directly extending the Viewport interface
 type ViewportWithPlugins = Viewport & {
   events?: {
     removeAllListeners?: () => void;
   };
-  // 避免使用plugins数组类型，它与Viewport.plugins(PluginManager)冲突
-  // 使用字符串索引以便访问插件方法
+  // avoid using plugins array type, it conflicts with Viewport.plugins(PluginManager)
+  // use string index to access plugin methods
   [key: string]: any;
 };
 
@@ -41,16 +41,16 @@ export default PixiComponent<ViewportProps, Viewport>('Viewport', {
       viewportRef.current = viewport;
     }
     
-    // 计算适合的初始缩放值
+    // calculate appropriate initial scale value
     const worldAspect = props.worldWidth / props.worldHeight;
     const screenAspect = props.screenWidth / props.screenHeight;
     
-    // 计算初始缩放，使用更大的比例系数以增加初始缩放
+    // calculate initial scale, use larger scale factor to increase initial scale
     const initialScale = worldAspect > screenAspect 
-      ? (props.screenWidth * 3.0) / props.worldWidth  // 水平填充，放大3.0倍
-      : (props.screenHeight * 3.0) / props.worldHeight; // 垂直填充，放大3.0倍
+      ? (props.screenWidth * 3.0) / props.worldWidth  // horizontal fill, scale up 3.0 times
+      : (props.screenHeight * 3.0) / props.worldHeight; // vertical fill, scale up 3.0 times
     
-    // 计算缩放限制，确保最小缩放时完全填充屏幕
+    // calculate scale limit, ensure minimum scale fills the screen completely
     const minScale = Math.max(
       props.screenWidth / props.worldWidth,
       props.screenHeight / props.worldHeight
@@ -65,14 +65,14 @@ export default PixiComponent<ViewportProps, Viewport>('Viewport', {
       .clamp({ 
         direction: 'all', 
         underflow: 'center',
-        left: -50,    // 允许少量溢出以防止蓝边
+        left: -50,    // allow slight overflow to prevent blue edges
         right: props.worldWidth + 50,
         top: -50,
         bottom: props.worldHeight + 50
       })
       .setZoom(initialScale)
       .clampZoom({
-        minScale: minScale * 1.5, // 增加最小缩放以匹配新的初始缩放
+        minScale: minScale * 1.5, // increase minimum scale to match new initial scale
         maxScale: 5.0,
       });
     return viewport;
@@ -86,16 +86,16 @@ export default PixiComponent<ViewportProps, Viewport>('Viewport', {
       }
     });
   },
-  // PixiComponent不支持destroy方法，我们将在组件卸载时手动处理清理工作
+  // PixiComponent does not support destroy method, we will manually handle cleanup when the component unmounts
   willUnmount(viewport: Viewport) {
     try {
-      // 将viewport转换为我们的ViewportWithPlugins类型以使用扩展属性
+      // convert viewport to our ViewportWithPlugins type to use extended properties
       const vp = viewport as ViewportWithPlugins;
       
-      // 确保viewport存在
+      // ensure viewport exists
       if (!vp) return;
         
-      // 尝试安全地删除事件监听器
+      // try to safely remove event listeners
       try {
         if (vp.events && typeof vp.events.removeAllListeners === 'function') {
           vp.events.removeAllListeners();
@@ -104,7 +104,7 @@ export default PixiComponent<ViewportProps, Viewport>('Viewport', {
         console.warn('Error removing viewport event listeners:', e);
       }
       
-      // 尝试销毁常见插件
+      // try to destroy common plugins
       const pluginNames = ['drag', 'pinch', 'wheel', 'decelerate', 'clamp', 'clampZoom'];
       for (const name of pluginNames) {
         try {
@@ -113,11 +113,11 @@ export default PixiComponent<ViewportProps, Viewport>('Viewport', {
             plugin.destroy();
           }
         } catch (e) {
-          // 忽略单个插件错误，继续处理其他插件
+          // ignore individual plugin errors, continue processing other plugins
         }
       }
       
-      // 尝试安全销毁viewport
+      // try to safely destroy viewport
       try {
         if (typeof vp.destroy === 'function') {
           vp.destroy({ children: true, texture: true, baseTexture: true });

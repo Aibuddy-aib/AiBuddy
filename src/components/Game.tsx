@@ -3,8 +3,6 @@ import PixiGame from './PixiGame.tsx';
 import ChatPanel from './ChatPanel.tsx';
 import ProfileSidebar from './ProfileSidebar.tsx';
 import ErrorBoundary from './ErrorBoundary.tsx';
-import AdminTools from './AdminTools';
-
 import { useElementSize } from 'usehooks-ts';
 import { Stage } from '@pixi/react';
 import { ConvexProvider, useConvex, useQuery, useMutation } from 'convex/react';
@@ -16,13 +14,14 @@ import { DebugTimeManager } from './DebugTimeManager.tsx';
 import { GameId } from '../../convex/aiTown/ids.ts';
 import { useServerGame } from '../hooks/serverGame.ts';
 import { toast } from 'react-hot-toast';
-import { useWallet } from '@solana/wallet-adapter-react';
 import SolanaWalletConnect from './SolanaWalletConnect';
 import SolanaWalletProvider from './SolanaWalletProvider';
+import { Id } from '../../convex/_generated/dataModel';
+import { requestSignature, type SignatureData, switchToTargetNetwork, isNetworkSupported, getNetworkName } from '../utils/walletSignature';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
-// 为window.ethereum和window.solana定义类型
+// Define types for window.ethereum and window.solana
 declare global {
   interface Window {
     ethereum?: any;
@@ -30,12 +29,7 @@ declare global {
   }
 }
 
-interface GameProps {
-  userAddress?: string | null;
-  userData?: any | null;
-}
-
-// PIXI游戏组件包装器，用错误边界包装PIXI游戏
+// PIXI game component wrapper, wrapped with error boundary
 const PixiGameWrapper = ({ 
   game, 
   worldId, 
@@ -51,13 +45,13 @@ const PixiGameWrapper = ({
     <ErrorBoundary fallback={
       <div className="w-full h-full flex items-center justify-center bg-slate-800 text-white">
         <div className="text-center p-6 max-w-md">
-          <h3 className="text-xl font-bold mb-4">游戏渲染出错</h3>
-          <p className="mb-4">游戏界面渲染时发生错误，这可能是由于网络连接问题或资源加载失败造成的。</p>
+          <h3 className="text-xl font-bold mb-4">Game Rendering Error</h3>
+          <p className="mb-4">An error occurred while rendering the game interface. This may be due to network connection issues or resource loading failures.</p>
           <button 
             onClick={() => window.location.reload()} 
             className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
           >
-            刷新页面
+            Refresh Page
           </button>
         </div>
       </div>
@@ -80,323 +74,97 @@ const PixiGameWrapper = ({
   );
 };
 
-// 注册提示组件，当检测到钱包连接但没有用户数据时显示
-const RegistrationPrompt = ({ onRegister, isRegistering }: { onRegister: () => void, isRegistering: boolean }) => {
-  return (
-    <div className="fixed top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 p-3 shadow-md z-50 flex justify-between items-center">
-      <div className="flex items-center">
-        <span className="text-yellow-800 mr-2">⚠️</span>
-        <span className="text-yellow-800">检测到钱包已连接，但未找到玩家数据。需要完成注册才能保存游戏进度。</span>
-      </div>
-      <button
-        onClick={onRegister}
-        disabled={isRegistering}
-        className={`px-4 py-2 rounded font-medium ${
-          isRegistering
-            ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
-            : 'bg-blue-500 hover:bg-blue-600 text-white'
-        }`}
-      >
-        {isRegistering ? '注册中...' : '立即注册'}
-      </button>
-    </div>
-  );
-};
-
-// 调试信息面板，仅在开发环境中显示
-const DebugPanel = ({ userData, playerData, isRegistered, address }: any) => {
-  return (
-    <div className="fixed bottom-0 left-0 z-50 bg-black bg-opacity-80 text-green-400 p-3 font-mono text-xs max-w-md max-h-64 overflow-auto">
-      <h3 className="text-yellow-400 font-bold mb-1">Debug Info:</h3>
-      <div>Wallet: {address ? address.substring(0, 10) + '...' : 'Not connected'}</div>
-      <div>Registered: {isRegistered ? 'Yes' : 'No'}</div>
-      <div>Has userData: {userData ? 'Yes' : 'No'}</div>
-      <div>Has playerData: {playerData ? 'Yes' : 'No'}</div>
-      {userData && (
-        <div className="mt-1">
-          <div>playerId: {userData.playerId || 'N/A'}</div>
-          <div>worldId: {userData.worldId || 'N/A'}</div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// 添加诊断面板组件
-const DiagnosticsPanel = ({ 
-  userData, 
-  userAddress, 
-  playerData, 
-  onForceWrite, 
-  isRegistered 
-}: { 
-  userData: any; 
-  userAddress: string | null;
-  playerData: any;
-  onForceWrite: () => void;
-  isRegistered: boolean;
-}) => {
-  const allPlayers = useQuery(api.newplayer.getAllPlayers);
-  const createPlayerSimpleMutation = useMutation(api.newplayer.createPlayerSimple);
-  const [localAddress, setLocalAddress] = useState(userAddress || '');
+function generateSecureRandomName(length: number = 8): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const array = new Uint8Array(length);
+  crypto.getRandomValues(array);
   
-  // 使用本地输入的地址创建用户
-  const createWithLocalAddress = async () => {
-    if (!localAddress) {
-      alert('请输入有效的钱包地址');
-      return;
-    }
-    
-    try {
-      console.log("使用手动输入地址创建用户:", localAddress);
-      const result = await createPlayerSimpleMutation({
-        name: 'Manual User',
-        displayName: 'Manual User',
-        ethAddress: localAddress,
-        aibtoken: 20,
-      });
-      
-      console.log("手动创建用户成功:", result);
-      alert('用户创建成功，请刷新页面');
-    } catch (error) {
-      console.error("手动创建用户失败:", error);
-      alert('创建失败: ' + String(error));
-    }
-  };
-  
-  return (
-    <div className="fixed bottom-24 right-4 z-50 bg-black bg-opacity-80 text-green-400 p-4 rounded-lg shadow-lg text-xs max-w-md max-h-96 overflow-auto">
-      <h3 className="text-yellow-400 font-bold mb-2">数据库诊断:</h3>
-      
-      <div className="mb-2 pb-2 border-b border-gray-700">
-        <div>钱包地址: {userAddress || '未连接'}</div>
-        <div>注册状态: {isRegistered ? '已注册' : '未注册'}</div>
-        <div>用户数据: {userData ? '已加载' : '未加载'}</div>
-        <div>数据库记录: {playerData ? '已找到' : '未找到'}</div>
-      </div>
-      
-      <div className="mb-2 pb-2 border-b border-gray-700">
-        <h4 className="text-yellow-300">操作:</h4>
-        <button
-          onClick={onForceWrite}
-          className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs w-full"
-        >
-          强制写入数据
-        </button>
-      </div>
-      
-      <div className="mb-3 pb-2 border-b border-gray-700">
-        <h4 className="text-yellow-300">手动创建用户:</h4>
-        <div className="flex items-center mt-1">
-          <input 
-            type="text" 
-            value={localAddress}
-            onChange={(e) => setLocalAddress(e.target.value)}
-            placeholder="输入钱包地址"
-            className="flex-1 bg-gray-800 text-white px-2 py-1 rounded text-xs"
-          />
-          <button
-            onClick={createWithLocalAddress}
-            className="ml-1 px-2 py-1 bg-green-600 hover:bg-green-700 text-white rounded text-xs"
-          >
-            创建
-          </button>
-        </div>
-      </div>
-      
-      <div className="mb-2">
-        <h4 className="text-yellow-300">数据库记录 ({allPlayers?.length || 0}):</h4>
-        {allPlayers && allPlayers.length > 0 ? (
-          <div className="mt-1">
-            {allPlayers.map((player, index) => (
-              <div key={index} className="mt-1 pt-1 border-t border-gray-700 text-2xs">
-                <div>名称: {player.displayName}</div>
-                <div className="truncate">钱包: {player.ethAddress}</div>
-                <div>玩家ID: {player.playerId}</div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-red-400 mt-1">数据库为空</div>
-        )}
-      </div>
-      
-      {playerData && (
-        <div className="mt-2 pt-2 border-t border-gray-700">
-          <h4 className="text-yellow-300">当前玩家数据:</h4>
-          <pre className="text-xs whitespace-pre-wrap mt-1">{JSON.stringify(playerData, null, 2)}</pre>
-        </div>
-      )}
-    </div>
-  );
-};
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(array[i] % chars.length);
+  }
+  return result;
+}
 
-export default function Game({ userAddress, userData }: GameProps) {
+interface GameProps {
+  selectedWorldId?: Id<'worlds'> | null;
+  onWorldChange?: (worldId: Id<'worlds'>) => void;
+}
+
+export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
   const convex = useConvex();
   const [selectedElement, setSelectedElement] = useState<{
     kind: 'player';
     id: GameId<'players'>;
   }>();
   
-  // 添加钱包连接状态
-  const [connectedWalletAddress, setConnectedWalletAddress] = useState<string | null>(userAddress || null);
+  // Add wallet connection state
+  const [connectedWalletAddress, setConnectedWalletAddress] = useState<string | null>(null);
   
-  // 添加钱包类型标记
-  const [walletType, setWalletType] = useState<'ethereum' | 'solana' | null>(null);
-  
-  // 判断是否为移动设备
+  // Determine if it's a mobile device
   const [isMobile, setIsMobile] = useState(false);
-  // 添加移动端视图切换状态，增加chat选项
+  // Add mobile view switching state, add chat option
   const [mobileView, setMobileView] = useState<'game' | 'profile' | 'details' | 'chat'>('game');
   
-  // 添加注册状态跟踪
+  // Add registration state tracking
   const [isRegistered, setIsRegistered] = useState(false);
-  const [isShowingRegPrompt, setIsShowingRegPrompt] = useState(false);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const registrationAttempted = useRef(false);
+  const [player, setPlayer] = useState<any>(null);
+  
+  // Add world selection logic
+  const [currentWorldId, setCurrentWorldId] = useState<Id<'worlds'> | null>(null);
+  // const [selectedWorldForLogin, setSelectedWorldForLogin] = useState<Id<'worlds'> | null>(null);
+
   const registrationDelay = useRef<NodeJS.Timeout | null>(null);
   const pendingAutoRegister = useRef(false);
+
+  // Use the passed selectedWorldId, if not available use default world
+  const worldStatus = useQuery(api.world.defaultWorldStatus);
+  const worldId = selectedWorldId || worldStatus?.worldId;
+  const engineId = worldStatus?.engineId;
+
+  const game = useServerGame(worldId);
   
-  // 添加最后一次注册尝试时间引用
+  // Add reference for last registration attempt time
   const lastRegistrationAttempt = useRef(0);
-  
-  // Convex mutations
-  const createOrUpdatePlayerMutation = useMutation(api.newplayer.createOrUpdatePlayer);
-  // 添加简化版用户创建函数
-  const createPlayerSimpleMutation = useMutation(api.newplayer.createPlayerSimple);
-  
-  // 新增：强制写入计数器
-  const forceWriteCount = useRef(0);
-  
-  // 查询玩家数据验证是否已注册
-  const playerData = useQuery(
-    api.newplayer.getPlayerByEthAddress, 
-    connectedWalletAddress ? { ethAddress: connectedWalletAddress } : 'skip'
-  );
 
-  // 新增：使用简化API直接写入方法，无视任何条件直接写入数据
-  const forceWritePlayerData = useCallback(async () => {
-    console.log(`[FORCE WRITE] Attempting ${forceWriteCount.current + 1}th data write...`, { 
-      userData, 
-      userAddress: connectedWalletAddress,
-      playerId: userData?.playerId || null
-    });
-    
-    // 即使没有userData，只要有钱包地址也能创建记录
-    if (!connectedWalletAddress) {
-      console.error("[FORCE WRITE] Missing wallet address, cannot write data");
-      return false;
-    }
-    
-    try {
-      // 首先检查数据库中是否已有该用户数据
-      // 如果playerData已存在，说明用户已在数据库中有记录
-      if (playerData) {
-        console.log("[FORCE WRITE] User data already exists in database, skipping force write to avoid token reset:", playerData);
-        // 用户已存在，不需要重写数据库
-        forceWriteCount.current = 3; // 设置为3以停止重试
-        return true;
-      }
-      
-      // 生成一个唯一的playerId，如果userData中没有
-      const now = Date.now();
-      const randomDigits = Math.floor(1000 + Math.random() * 9000); // 生成1000-9999之间的四位数
-      const generatedPlayerId = `AiB_${randomDigits}`;
-      const effectivePlayerId = userData?.playerId || generatedPlayerId;
-      
-      console.log("[FORCE WRITE] Using playerId:", effectivePlayerId);
-      
-      // 优先尝试使用简化API
-      try {
-        console.log("[FORCE WRITE] Trying to create user data with simplified API");
-        const result = await createPlayerSimpleMutation({
-          name: userData?.name || 'Guest User',
-          displayName: userData?.name || 'Guest User',
-          ethAddress: connectedWalletAddress,
-          aibtoken: userData?.aibtoken || 5,
-        });
-        
-        console.log("[FORCE WRITE] Simplified API data write successful:", result);
-        forceWriteCount.current += 1;
-        return true;
-      } catch (simpleApiError) {
-        console.error("[FORCE WRITE] Simplified API write failed, trying standard API:", simpleApiError);
-        
-        // 如果简化API失败，尝试使用标准API
-        // 创建要写入的数据对象
-        const playerData: any = {
-          playerId: effectivePlayerId,
-          name: userData?.name || 'Guest User',
-          displayName: userData?.name || 'Guest User',
-          ethAddress: connectedWalletAddress,
-          aibtoken: userData?.aibtoken || 5,
-          isWorking: false,
-          workStartTime: undefined,
-        };
-        
-        // 尝试添加worldId
-        if (userData?.worldId) {
-          playerData.worldId = userData.worldId;
-        }
-        
-        // 直接调用mutation写入数据
-        const result = await createOrUpdatePlayerMutation(playerData);
-        
-        console.log("[FORCE WRITE] Standard API data write successful:", result);
-        forceWriteCount.current += 1;
-        return true;
-      }
-    } catch (error) {
-      console.error("[FORCE WRITE] All attempts failed:", error);
-      forceWriteCount.current += 1;
-      return false;
-    }
-  }, [userData, connectedWalletAddress, createOrUpdatePlayerMutation, createPlayerSimpleMutation, playerData]);
+  // login
+  const loginMutation = useMutation(api.newplayer.loginPlayer);
 
-  // 新增：自动检测钱包地址变化
+  // register
+  const registerMutation = useMutation(api.newplayer.registerPlayer);
+
+  // verify signature
+  const verifySignatureMutation = useMutation(api.newplayer.verifyWalletSignature);
+
+  // useEffect(() => {
+  //   if (engineId && player?.playerId) {
+  //     usePlayerHeartbeat(engineId, player.playerId);
+  //     console.log("player heartbeat: ", player.playerId);
+  //   }
+  // }, [engineId, player]);
+  
+  // Listen for worldId changes, assign value on first entry
   useEffect(() => {
-    if (connectedWalletAddress) {
-      console.log("[WALLET DETECTION] Wallet address detected:", connectedWalletAddress);
-      // 即使没有userData，也尝试直接写入数据
-      setTimeout(() => {
-        console.log("[WALLET DETECTION] Attempting automatic data write...");
-        forceWritePlayerData();
-      }, 1000);
-    }
-  }, [connectedWalletAddress, forceWritePlayerData]);
+    if (worldId && !currentWorldId) setCurrentWorldId(worldId);
+  }, [worldId]);
 
-  // 新增：组件加载后立即尝试写入数据
+  // Listen for selectedWorldId changes, update current world ID
   useEffect(() => {
-    if (userData && userAddress) {
-      // 第一次加载时，立即尝试写入
-      const timer = setTimeout(forceWritePlayerData, 2000);
-      
-      // 设置多次尝试写入的定时器，确保数据最终能被写入
-      const intervalTimer = setInterval(() => {
-        if (forceWriteCount.current < 3) {
-          forceWritePlayerData();
-        } else {
-          clearInterval(intervalTimer);
-        }
-      }, 5000);
-      
-      return () => {
-        clearTimeout(timer);
-        clearInterval(intervalTimer);
-      };
+    if (selectedWorldId) {
+      setCurrentWorldId(selectedWorldId);
     }
-  }, [userData, userAddress, forceWritePlayerData]);
+  }, [selectedWorldId]);
   
-  // 检测设备类型
+  // Detect device type
   useEffect(() => {
     const checkDeviceType = () => {
       setIsMobile(window.matchMedia("(max-width: 768px)").matches);
     };
     
-    // 初始检测
+    // Initial detection
     checkDeviceType();
     
-    // 监听窗口大小变化
+    // Listen for window size changes
     window.addEventListener('resize', checkDeviceType);
     
     return () => {
@@ -404,149 +172,186 @@ export default function Game({ userAddress, userData }: GameProps) {
     };
   }, []);
 
-  // 使用useCallback创建稳定的函数引用
-  const registerPlayerData = useCallback(async (address: string, data: any) => {
-    if (!data) {
-      console.log("[REGISTRATION] User data not yet available, cannot register to newplayer table");
-      toast.error("User data not available yet. Please try again later.");
-      return false;
-    }
-    
-    if (!data.playerId) {
-      console.log("[REGISTRATION] Failed to get playerId, cannot register to newplayer table", data);
-      toast.error("Player ID is missing. Please try refreshing the page.");
-      return false;
-    }
-
-    setIsRegistering(true);
-
-    try {
-      // 准备注册数据 - 创建干净的对象
-      const registerData: any = {
-        playerId: data.playerId,
-        name: data.name || 'Unnamed User',
-        displayName: data.name || 'Unnamed User',
-        ethAddress: address,
-        aibtoken: data.aibtoken || 0,
-        isWorking: false,
-        workStartTime: undefined
-      };
-      
-      // 如果有worldId，则添加到数据中
-      if (data.worldId) {
-        registerData.worldId = data.worldId;
-        console.log("[REGISTRATION] Registering user data to newplayer table (with worldId)...", registerData);
-      } else {
-        console.log("[REGISTRATION] Registering user data to newplayer table (no worldId)...", registerData);
+  useEffect(() => {
+    async function checkWalletConnection() {
+      console.log(`[flash] check ethereum ${window.ethereum} and connectedWalletAddress ${localStorage.getItem('connectedWalletAddress')}`);
+      if (window.ethereum && localStorage.getItem('connectedWalletAddress')) {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        if (accounts.length > 0 && accounts[0]) {
+          setConnectedWalletAddress(accounts[0]);
+          localStorage.setItem('connectedWalletAddress', accounts[0]);
+          // Only login player if not already logged in or if this is the initial load
+          if (!player) {
+            const player = await loginPlayer(accounts[0], selectedWorldId || worldId);
+            if (player) {
+              setPlayer(player);
+            }
+          }
+        } else {
+          setConnectedWalletAddress(null);
+          setPlayer(null);
+          localStorage.removeItem('connectedWalletAddress');
+        }
       }
-      
-      // 添加延迟确保数据库操作完成
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const result = await createOrUpdatePlayerMutation(registerData);
-      
-      console.log("[REGISTRATION] User data successfully registered to newplayer table:", result);
-      toast.success("Profile data synchronized to database");
-      setIsRegistered(true);
-      setIsShowingRegPrompt(false);
-      setIsRegistering(false);
-      return true;
-    } catch (error) {
-      console.error("[REGISTRATION] Failed to register user data to newplayer table:", error);
-      toast.error("Failed to sync profile data. Please try again.");
-      setIsRegistering(false);
-      return false;
     }
-  }, [createOrUpdatePlayerMutation]);
-
-  // 修改注册用户数据到newplayer表函数，使用useCallback创建的函数
-  const registerUserData = useCallback(async (address: string) => {
-    return registerPlayerData(address, userData);
-  }, [userData, registerPlayerData]);
-
-  // 手动注册处理函数
-  const handleManualRegister = useCallback(async () => {
-    if (!connectedWalletAddress) {
-      toast.error("Please connect your wallet first");
-      return;
+    if (worldId) {
+      checkWalletConnection();
     }
+  }, [worldId, player]);
 
-    await registerUserData(connectedWalletAddress);
-  }, [connectedWalletAddress, registerUserData]);
-
-  // 连接以太坊钱包功能
+  // Connect Ethereum wallet function with signature authentication
   const connectWallet = async () => {
     try {
-      // 检查是否有 MetaMask 或其他以太坊提供者
+      // Check if there's MetaMask or other Ethereum provider
       if (window.ethereum) {
-        console.log("【钱包】Ethereum provider detected");
-        
-        // 检查当前网络
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-        if (chainId === '0x38' || chainId === '0x61') {
-          toast.error("BSC network detected. Please switch to Ethereum Mainnet and try again.");
-          return;
-        }
+        console.log("[wallet] Ethereum provider detected");
         
         try {
-          // 请求用户授权连接账户
+          // First request user authorization to connect account (popup MetaMask window)
+          console.log("[debug] Requesting user authorization...");
           const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          console.log("[debug] Got accounts:", accounts);
           const account = accounts[0];
           
-          // 更新状态
-          setConnectedWalletAddress(account);
-          setWalletType('ethereum');
+          // After user authorization, check and switch network
+          console.log("[debug] Checking network...");
+          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+          console.log("[debug] Current network chainId:", chainId);
           
-          // 显示成功消息
-          toast.success("钱包连接成功!");
-          
-          console.log("【钱包】Connected to wallet:", account);
-          
-          // 检查userData是否已加载
-          if (userData && userData.playerId && userData.worldId) {
-            console.log("【钱包】userData已准备好，立即尝试注册");
-            await registerUserData(account);
+          // Check if current network is supported
+          if (!isNetworkSupported(chainId)) {
+            console.log("[debug] Current network not supported, switching to BSC...");
+            toast("Switching to BSC network...");
+            await switchToTargetNetwork();
+          } else if (chainId !== '0x38') {
+            // If on supported network but not BSC mainnet, switch to BSC
+            console.log("[debug] On supported network but not BSC mainnet, switching...");
+            toast("Switching to BSC mainnet for best experience...");
+            await switchToTargetNetwork();
           } else {
-            console.log("【钱包】userData未准备好，标记等待注册");
-            toast.success("钱包已连接，等待用户数据注册...");
-            // 标记等待自动注册
-            pendingAutoRegister.current = true;
-            
-            // 设置延迟，如果10秒后仍未注册成功，显示手动注册提示
-            registrationDelay.current = setTimeout(() => {
-              if (!isRegistered && connectedWalletAddress) {
-                console.log("【钱包】10秒超时，显示手动注册提示");
-                setIsShowingRegPrompt(true);
-              }
-            }, 10000);
+            console.log("[debug] Already on BSC mainnet");
           }
           
+          // Request signature for authentication
+          console.log("[debug] Requesting signature for authentication...");
+          const signatureData = await requestSignature(account);
+          console.log("[debug] Got signature:", signatureData);
+          
+          // Verify signature on backend
+          const verifyResult = await verifySignatureMutation({
+            ethAddress: account,
+            signature: signatureData.signature,
+            message: signatureData.message,
+            worldId: selectedWorldId || worldStatus?.worldId!
+          });
+          
+          if (!verifyResult.success) {
+            if (verifyResult.requiresRegistration) {
+              // Player not found, proceed with registration
+              console.log("[wallet] Player not found, proceeding with registration");
+              const player = await loginPlayer(account, selectedWorldId || worldStatus?.worldId);
+              if (player) {
+                setConnectedWalletAddress(account);
+                setPlayer(player);
+                toast.success("Wallet connected and player registered successfully!");
+              }
+            } else {
+              throw new Error(verifyResult.message);
+            }
+          } else {
+            // Signature verified successfully or player exists in different world
+            console.log("[wallet] Signature verified successfully");
+            setConnectedWalletAddress(account);
+            toast.success("Wallet connected and authenticated successfully!");
+            
+            const player = await loginPlayer(account, selectedWorldId || worldStatus?.worldId);
+            if (player) {
+              setPlayer(player);
+            }
+          }
         } catch (error) {
-          console.error("【钱包】User rejected the connection request", error);
-          toast.error("连接钱包失败。用户拒绝了连接请求。");
+          console.error("[wallet] User rejected the connection or signature request", error);
+          toast.error("Failed to connect wallet. User rejected the request.");
         }
       } else {
-        console.log("【钱包】No Ethereum provider found");
-        toast.error("未检测到钱包! 请安装MetaMask或其他Web3钱包。");
+        console.log("[wallet] No Ethereum provider found");
+        toast.error("No wallet detected! Please install MetaMask or other Web3 wallet.");
       }
     } catch (error) {
-      console.error("【钱包】Error connecting to wallet:", error);
-      toast.error("连接钱包失败。请重试。");
+      console.error("[wallet] Error connecting to wallet:", error);
+      toast.error("Failed to connect wallet. Please try again.");
     }
   };
 
-  // 断开钱包连接功能
+  const loginPlayer = async (account: string, worldId: Id<'worlds'> | undefined) => {
+    const loginResult = await loginMutation({
+      worldId: worldId!,
+      ethAddress: account
+    });
+
+    // login, if player not found, register player
+    if (!loginResult.success && (loginResult.player === null)) {
+      console.log("[wallet] login player failed, register player: ", loginResult);
+      const registerResult = await registerMutation({
+        worldId: worldId!,
+        name: generateSecureRandomName(8),
+        ethAddress: account,
+      });
+      if (registerResult.success) {
+        // Set the world ID for the newly registered player
+        if (registerResult.worldId) {
+          setCurrentWorldId(registerResult.worldId);
+          if (onWorldChange) {
+            onWorldChange(registerResult.worldId);
+          }
+        }
+        return registerResult.player;
+      } else {
+        console.log("register player failed", registerResult);
+        return;
+      }
+    }
+
+    // Handle case where player exists in different world
+    if (loginResult.success && loginResult.player && loginResult.message?.includes('different world')) {
+      const playerWorldId = loginResult.player.worldId;
+      
+      // Switch to player's world
+      setCurrentWorldId(playerWorldId);
+      if (onWorldChange) {
+        onWorldChange(playerWorldId);
+      }
+      
+      // Try to login again in the correct world
+      const retryLoginResult = await loginMutation({
+        worldId: playerWorldId,
+        ethAddress: account
+      });
+      
+      if (retryLoginResult.success) {
+        localStorage.setItem('connectedWalletAddress', account);
+        return retryLoginResult.player;
+      }
+    }
+
+    // cache
+    localStorage.setItem('connectedWalletAddress', account);
+
+    return loginResult.player;
+  }
+
+  // Disconnect wallet function
   const disconnectWallet = () => {
-    // 清除连接状态
+    // Clear connection state
     setConnectedWalletAddress(null);
-    setWalletType(null);
     
-    // 清除localStorage中保存的用户名，使场景中不再有角色高亮
+    // Clear username saved in localStorage, so no character highlighting in scene
     localStorage.removeItem('currentUserName');
+    localStorage.removeItem('connectedWalletAddress');
     
-    // 重置其他相关状态
+    // Reset other related states
     setIsRegistered(false);
-    setIsShowingRegPrompt(false);
+    // setIsShowingRegPrompt(false);
     pendingAutoRegister.current = false;
     
     if (registrationDelay.current) {
@@ -554,188 +359,119 @@ export default function Game({ userAddress, userData }: GameProps) {
       registrationDelay.current = null;
     }
     
-    // 显示断开连接成功消息
-    toast.success("钱包断开连接成功");
+    // Show disconnect success message
+    toast.success("Wallet disconnected successfully");
     
-    // 添加一个很短的延迟后刷新页面，确保断开连接操作完成
+    // Add a short delay before refreshing page to ensure disconnect operation completes
     setTimeout(() => {
       window.location.reload();
     }, 100);
   };
 
-  // 处理Solana钱包连接
-  const handleSolanaWalletConnect = useCallback((address: string) => {
-    // 检查是否与当前连接的地址相同以避免重复连接
+  // Handle Solana wallet connection
+  const handleSolanaWalletConnect = useCallback(async (address: string) => {
+    // Check if same as currently connected address to avoid duplicate connection
     if (connectedWalletAddress === address) {
-      console.log("【Solana钱包】忽略重复连接请求，地址相同:", address);
+      console.log("[solana wallet] Ignore duplicate connection request, same address:", address);
       return;
     }
     
-    console.log("【Solana钱包】Connected to wallet:", address);
+    console.log("[solana wallet] Connected to wallet:", address);
     setConnectedWalletAddress(address);
-    setWalletType('solana');
-    
-    // 检查userData是否已加载
-    if (userData && userData.playerId && userData.worldId) {
-      console.log("【Solana钱包】userData已准备好，立即尝试注册");
-      registerUserData(address);
-    } else {
-      console.log("【Solana钱包】userData未准备好，标记等待注册");
-      toast.success("Solana钱包已连接，等待用户数据注册...");
-      // 标记等待自动注册
-      pendingAutoRegister.current = true;
-      
-      // 设置延迟，如果10秒后仍未注册成功，显示手动注册提示
-      registrationDelay.current = setTimeout(() => {
-        if (!isRegistered && connectedWalletAddress) {
-          console.log("【Solana钱包】10秒超时，显示手动注册提示");
-          setIsShowingRegPrompt(true);
-        }
-      }, 10000);
-    }
-  }, [connectedWalletAddress, userData, isRegistered, registerUserData]);
 
-  // 处理Solana钱包断开连接
+    const player = await loginPlayer(address, worldStatus?.worldId);
+    if (player) {
+      setPlayer(player);
+    }
+  }, [connectedWalletAddress, player]);
+
+  // Handle Solana wallet disconnection
   const handleSolanaWalletDisconnect = useCallback(() => {
-    // 调用通用的断开连接函数
+    // Call common disconnect function
     disconnectWallet();
   }, []);
 
-  // 使用useEffect检查是否已经注册
+  // Use useEffect to check if already registered
   useEffect(() => {
-    if (playerData) {
-      console.log("【检查】从数据库查询到用户数据:", playerData);
+    if (player) {
+      console.log("[check] User data queried from database:", player);
       setIsRegistered(true);
-      setIsShowingRegPrompt(false);
       
       if (registrationDelay.current) {
         clearTimeout(registrationDelay.current);
         registrationDelay.current = null;
       }
-    } else if (connectedWalletAddress) {
-      console.log("【检查】未找到用户数据，可能需要注册");
-      
-      // 没有找到数据，再次尝试强制写入
-      forceWritePlayerData();
-      
-      // 设置显示注册提示的延迟，给自动注册一些时间
-      if (isRegistered === false && !registrationDelay.current) {
-        registrationDelay.current = setTimeout(() => {
-          setIsShowingRegPrompt(true);
-        }, 5000);
-      }
-    }
+    } 
     
-    // 组件卸载时清除定时器
+    // Clear timer when component unmounts
     return () => {
       if (registrationDelay.current) {
         clearTimeout(registrationDelay.current);
       }
     };
-  }, [playerData, connectedWalletAddress, isRegistered, forceWritePlayerData]);
+  }, [player, connectedWalletAddress, isRegistered]);
 
-  // 监控userData变化，触发自动注册
+  // monitor player change, trigger auto register
   useEffect(() => {
-    let isMounted = true; // 组件挂载状态标记
+    let isMounted = true; // Component mount state marker
     
     const autoRegister = async () => {
-      // 防止重复注册：检查是否在短时间内（1秒内）已经尝试过注册
+      // Prevent duplicate registration: check if registration was attempted recently (within 1 second)
       const now = Date.now();
       if (now - lastRegistrationAttempt.current < 1000) {
-        console.log("【自动注册】忽略短时间内的重复注册请求");
+        console.log("[auto register] Ignore duplicate registration requests in short time");
         return;
       }
       
       lastRegistrationAttempt.current = now;
-      
-      if (connectedWalletAddress && 
-          userData && 
-          userData.playerId && 
-          userData.worldId && 
-          !isRegistered && 
-          pendingAutoRegister.current &&
-          isMounted) {
-        
-        console.log("【自动注册】userData已更新，尝试自动注册");
+      if (connectedWalletAddress && !isRegistered && pendingAutoRegister.current && isMounted) {
+        console.log("[auto register] Player changed, trigger auto register");
         pendingAutoRegister.current = false;
-        await registerUserData(connectedWalletAddress);
+        await registerMutation({
+          worldId: worldId!,
+          name: generateSecureRandomName(8),
+          ethAddress: connectedWalletAddress,
+        });
       }
     };
     
     autoRegister();
     
     return () => {
-      isMounted = false; // 组件卸载时更新标记
+      isMounted = false; // Update marker when component unmounts
     };
-  }, [userData, connectedWalletAddress, isRegistered, registerUserData]);
-
-  // 当userData更新且钱包已连接时，更新用户数据
-  useEffect(() => {
-    const attemptRegistration = async () => {
-      // 确保不重复注册
-      if (userData && 
-          connectedWalletAddress && 
-          !isRegistered && 
-          !registrationAttempted.current && 
-          !isRegistering) {
-        
-        console.log("【强制注册】检测到userData和钱包已连接，尝试注册用户数据", {
-          worldId: userData.worldId,
-          playerId: userData.playerId,
-          userData: userData
-        });
-        
-        registrationAttempted.current = true;
-        setIsRegistering(true);
-        
-        // 使用registerPlayerData函数
-        try {
-          await registerPlayerData(connectedWalletAddress, userData);
-        } catch (error) {
-          console.error("【强制注册】强制注册失败:", error);
-          toast.error("Failed to register user data. Please try manual registration.");
-          // 显示手动注册提示
-          setIsShowingRegPrompt(true);
-          setIsRegistering(false);
-          // 重置标记以便下次可以重试
-          registrationAttempted.current = false;
-        }
-      }
-    };
-    
-    attemptRegistration();
-  }, [userData, connectedWalletAddress, isRegistered, isRegistering, registerPlayerData]);
+  }, [connectedWalletAddress, isRegistered, registerMutation]);
   
-  // 自定义setSelectedElement处理函数，添加日志以便调试
+  // Custom setSelectedElement handler function, add logs for debugging
   const handleSetSelectedElement = (element?: { kind: 'player'; id: GameId<'players'> }) => {
-    console.log("Game: handleSetSelectedElement被调用，参数:", element);
+    console.log("Game: handleSetSelectedElement called, parameter:", element);
     setSelectedElement(element);
-    console.log("Game: 已更新selectedElement为:", element);
+    console.log("Game: selectedElement updated to:", element);
     
-    // 在移动端，选择角色后自动切换到详情视图
+    // On mobile, automatically switch to details view after selecting character
     if (isMobile && element) {
       handleMobileViewChange('details');
     } else if (element) {
-      // 桌面端也滚动到顶部
+      // Desktop also scroll to top
       window.scrollTo(0, 0);
       
-      // 如果有滚动视图的引用，也将其滚动到顶部
+      // If there's a scroll view reference, also scroll it to top
       if (scrollViewRef.current) {
         scrollViewRef.current.scrollTop = 0;
       }
     }
   };
   
-  // 监听selectedElement变化
+  // Listen for selectedElement changes
   useEffect(() => {
-    console.log("Game: selectedElement状态变化:", selectedElement);
+    console.log("Game: selectedElement state change:", selectedElement);
   }, [selectedElement]);
   
-  // 添加按ESC键退出功能
+  // Add ESC key exit functionality
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && selectedElement) {
-        console.log("Game: ESC键被按下，清除选中状态");
+        console.log("Game: ESC key pressed, clearing selection");
         setSelectedElement(undefined);
       }
     };
@@ -746,25 +482,19 @@ export default function Game({ userAddress, userData }: GameProps) {
   
   const [gameWrapperRef, { width, height }] = useElementSize();
 
-  const worldStatus = useQuery(api.world.defaultWorldStatus);
-  const worldId = worldStatus?.worldId;
-  const engineId = worldStatus?.engineId;
-
-  const game = useServerGame(worldId);
-
-  // 添加ref来跟踪是否已经设置过初始角色
+  // Add ref to track if initial character has been set
   const initialPlayerSelected = useRef(false);
 
   useEffect(() => {
-    // 只在初次加载时设置玩家为自己，使用ref来跟踪是否已经初始化过
-    if (userData && userData.playerId && game && !initialPlayerSelected.current) {
+    // Only set player as self on initial load, use ref to track if already initialized
+    if (player && player.playerId && game && !initialPlayerSelected.current) {
       setSelectedElement({
         kind: 'player',
-        id: userData.playerId
+        id: player.playerId
       });
-      initialPlayerSelected.current = true; // 标记为已初始化
+      initialPlayerSelected.current = true; // Mark as initialized
     }
-  }, [userData, game]);
+  }, [player, game]);
 
   useWorldHeartbeat();
 
@@ -773,41 +503,26 @@ export default function Game({ userAddress, userData }: GameProps) {
 
   const scrollViewRef = useRef<HTMLDivElement>(null);
 
-  // 处理移动端视图切换，特殊处理chat视图
+  // Handle mobile view switching, special handling for chat view
   const handleMobileViewChange = (view: 'game' | 'profile' | 'details' | 'chat') => {
-    // 当切换到chat视图时，确保聊天面板是展开的
+    // When switching to chat view, ensure chat panel is expanded
     if (view === 'chat') {
       try {
         localStorage.setItem('chatPanelCollapsed', 'false');
       } catch (e) {
-        console.error('无法更新聊天面板状态:', e);
+        console.error('Unable to update chat panel state:', e);
       }
     }
     
-    // 滚动到页面顶部
+    // Scroll to page top
     window.scrollTo(0, 0);
     
-    // 如果视图有对应的容器ref，也将其滚动到顶部
+    // If view has corresponding container ref, also scroll it to top
     if (view === 'details' && scrollViewRef.current) {
       scrollViewRef.current.scrollTop = 0;
     }
     
     setMobileView(view);
-  };
-
-  const [showDebugInfo, setShowDebugInfo] = useState(false);
-  const [activeTab, setActiveTab] = useState('debug');
-  
-  // 添加debugStatus和allPlayers查询
-  const debugStatus = useQuery(api.world.debugStatus);
-  const allPlayers = useQuery(api.newplayer.getAllPlayers);
-
-  const initializePlayerData = () => {
-    // Implementation of initializePlayerData function
-  };
-
-  const createVirtualUser = () => {
-    // Implementation of createVirtualUser function
   };
 
   if (!worldId || !engineId || !game) {
@@ -821,12 +536,8 @@ export default function Game({ userAddress, userData }: GameProps) {
   return (
     <ErrorBoundary>
       <SolanaWalletProvider>
-      {/* 显示注册提示 */}
-      {isShowingRegPrompt && connectedWalletAddress && !isRegistered && (
-        <RegistrationPrompt onRegister={handleManualRegister} isRegistering={isRegistering} />
-      )}
       
-      {/* 隐藏的全局Solana钱包连接组件，确保移动端也可以使用 */}
+      {/* Hidden global Solana wallet connection component, ensure mobile can also use */}
       <div className="hidden">
         <SolanaWalletConnect 
           onWalletConnect={handleSolanaWalletConnect}
@@ -835,110 +546,105 @@ export default function Game({ userAddress, userData }: GameProps) {
       </div>
       
       {SHOW_DEBUG_UI && <DebugTimeManager timeManager={timeManager} width={200} height={100} />}
-      {/* 只在桌面端显示ChatPanel */}
+      {/* Only show ChatPanel on desktop */}
       {!isMobile && worldId && 
         <ChatPanel 
           worldId={worldId} 
           engineId={engineId} 
-          userData={userData} 
+          userData={player} 
           userAddress={connectedWalletAddress}
           isMobile={false}
         />
       }
       
-      {/* 隐藏所有调试相关UI */}
-      <div className="hidden">
-        <DiagnosticsPanel
-          userData={userData}
-          userAddress={connectedWalletAddress}
-          playerData={playerData}
-          onForceWrite={forceWritePlayerData}
-          isRegistered={isRegistered}
-        />
-      </div>
+      {/* Official website floating button - only show in production */}
+      {process.env.NODE_ENV === 'production' && (
+        <a 
+          href="https://aibuddy.top/#/" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="fixed top-4 left-4 z-50 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-black rounded-md text-sm font-medium transition-all transform hover:scale-105 shadow-lg"
+        >
+          Official Website
+        </a>
+      )}
       
-      {/* 官方网站悬浮按钮 */}
-      <a 
-        href="https://aibuddy.top/#/" 
-        target="_blank" 
-        rel="noopener noreferrer" 
-        className="fixed top-4 left-4 z-50 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-black rounded-md text-sm font-medium transition-all transform hover:scale-105 shadow-lg"
-      >
-        Official Website
-      </a>
-      
-      {/* 移动端布局 */}
+      {/* Mobile layout */}
       {isMobile ? (
         <div className="mx-auto w-full flex flex-col h-screen max-w-[1900px] overflow-hidden">
-          {/* 主内容区域 - 根据当前视图显示不同内容，添加底部padding防止被导航栏遮挡 */}
+          {/* Main content area - display different content based on current view, add bottom padding to prevent being covered by navigation bar */}
           <div className="flex-1 overflow-hidden pb-16">
-            {/* 只在选择game视图时渲染游戏组件，切换时完全卸载它 */}
+            {/* Only render game component when game view is selected, completely unload it when switching */}
             {mobileView === 'game' ? (
               <div className="relative h-full overflow-hidden bg-brown-900" ref={gameWrapperRef}>
-            <div className="absolute inset-0">
-              <div className="w-full h-full">
-                    <PixiGameWrapper
-                      game={game}
-                      worldId={worldId}
-                      engineId={engineId}
-                      width={width}
-                      height={height}
-                      historicalTime={historicalTime}
-                      setSelectedElement={handleSetSelectedElement}
-                      userAddress={connectedWalletAddress}
-                      convex={convex}
-                    />
+                <div className="absolute inset-0">
+                  <div className="w-full h-full">
+                        <PixiGameWrapper
+                          key={`game-${worldId}`} // Add key to ensure component is recreated when switching worlds
+                          game={game}
+                          worldId={worldId}
+                          engineId={engineId}
+                          width={width}
+                          height={height}
+                          historicalTime={historicalTime}
+                          setSelectedElement={handleSetSelectedElement}
+                          userAddress={connectedWalletAddress}
+                          convex={convex}
+                        />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
             ) : null}
             
-            {/* 只在选择profile视图时渲染个人信息组件 */}
+            {/* Only render profile component when profile view is selected */}
             {mobileView === 'profile' ? (
               <div className="h-full overflow-y-auto scrollbar">
                 <ProfileSidebar 
-                  userData={userData} 
+                  worldId={worldId}
+                  game={game}
+                  userData={player} 
                   userAddress={connectedWalletAddress} 
                   onConnectWallet={connectWallet}
                   onDisconnectWallet={disconnectWallet}
                   onSolanaWalletConnect={handleSolanaWalletConnect}
+                  onWorldChange={onWorldChange}
                 />
               </div>
             ) : null}
             
-            {/* 只在选择details视图时渲染详情组件 */}
+            {/* Only render details component when details view is selected */}
             {mobileView === 'details' ? (
               <div className="h-full overflow-y-auto scrollbar" ref={scrollViewRef}>
-            <PlayerDetails
-              worldId={worldId}
-              engineId={engineId}
-              game={game}
-              playerId={selectedElement?.id}
-              setSelectedElement={handleSetSelectedElement}
-              scrollViewRef={scrollViewRef}
-              userData={userData}
+                <PlayerDetails
+                  worldId={worldId}
+                  engineId={engineId}
+                  game={game}
+                  playerId={selectedElement?.id}
+                  setSelectedElement={handleSetSelectedElement}
+                  scrollViewRef={scrollViewRef}
+                  userData={player}
                   userAddress={connectedWalletAddress}
                 />
               </div>
             ) : null}
             
-            {/* 只在选择chat视图时渲染聊天组件 */}
+            {/* Only render chat component when chat view is selected */}
             {mobileView === 'chat' ? (
               <div className="h-full flex flex-col bg-gray-900">
                 <div className="flex-1 overflow-hidden">
                   <ChatPanel 
                     worldId={worldId} 
                     engineId={engineId} 
-                    userData={userData} 
+                    userData={player} 
                     userAddress={connectedWalletAddress}
                     isMobile={true}
-            />
+                  />
                 </div>
               </div>
             ) : null}
           </div>
           
-          {/* 底部导航栏 - 固定在屏幕底部 */}
+          {/* Bottom navigation bar - fixed at screen bottom */}
           <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around p-2 z-10 shadow-lg">
             <button 
               onClick={() => handleMobileViewChange('profile')} 
@@ -979,16 +685,19 @@ export default function Game({ userAddress, userData }: GameProps) {
           </div>
         </div>
       ) : (
-        /* 桌面端布局 - 添加ProfileSidebar */
-        <div className="mx-auto w-full grid grid-rows-[1fr] grid-cols-[320px_1fr_auto] grow max-w-[1900px] min-h-[600px] rounded-xl overflow-hidden border-4 border-gray-300 shadow-2xl">
-          {/* 左侧个人信息侧边栏，固定宽度 */}
+        /* Desktop layout - add ProfileSidebar */
+        <div className="mx-auto w-full grid grid-rows-[1fr] grid-cols-[320px_1fr_auto] grow max-w-[1900px] min-h-[600px] max-h-[650px] rounded-b-xl overflow-hidden border-4 border-gray-300 shadow-2xl">
+          {/* Left profile sidebar, fixed width */}
             <div className="w-[320px] h-full overflow-hidden flex flex-col">
             <ProfileSidebar 
-              userData={userData} 
+              worldId={worldId}
+              game={game}
+              userData={player} 
               userAddress={connectedWalletAddress} 
               onConnectWallet={connectWallet}
               onDisconnectWallet={disconnectWallet}
               onSolanaWalletConnect={handleSolanaWalletConnect}
+              onWorldChange={onWorldChange}
             />
           </div>
           
@@ -996,16 +705,17 @@ export default function Game({ userAddress, userData }: GameProps) {
             <div className="absolute inset-0">
               <div className="container">
                 <PixiGameWrapper
-                      game={game}
-                      worldId={worldId}
-                      engineId={engineId}
-                      width={width}
-                      height={height}
-                      historicalTime={historicalTime}
-                      setSelectedElement={handleSetSelectedElement}
+                  key={`game-${worldId}`} // Add key to ensure component is recreated when switching worlds
+                  game={game}
+                  worldId={worldId}
+                  engineId={engineId}
+                  width={width}
+                  height={height}
+                  historicalTime={historicalTime}
+                  setSelectedElement={handleSetSelectedElement}
                   userAddress={connectedWalletAddress}
                   convex={convex}
-                    />
+                />
               </div>
             </div>
           </div>
@@ -1020,7 +730,7 @@ export default function Game({ userAddress, userData }: GameProps) {
               playerId={selectedElement?.id}
               setSelectedElement={handleSetSelectedElement}
               scrollViewRef={scrollViewRef}
-              userData={userData}
+              userData={player}
               userAddress={connectedWalletAddress}
             />
           </div>
