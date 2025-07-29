@@ -4,8 +4,7 @@ const OPENAI_EMBEDDING_DIMENSION = 1536;
 const TOGETHER_EMBEDDING_DIMENSION = 768;
 const OLLAMA_EMBEDDING_DIMENSION = 1024;
 
-// 设置为 OpenAI 的嵌入维度，因为我们要用 GPT
-export const EMBEDDING_DIMENSION: number = OPENAI_EMBEDDING_DIMENSION;
+export const EMBEDDING_DIMENSION: number = OLLAMA_EMBEDDING_DIMENSION;
 
 export function detectMismatchedLLMProvider() {
   switch (EMBEDDING_DIMENSION) {
@@ -47,7 +46,6 @@ export interface LLMConfig {
 export function getLLMConfig(): LLMConfig {
   let provider = process.env.LLM_PROVIDER;
 
-  // 优先检测 OpenAI，因为你要用 GPT
   if (provider === 'openai' || (!provider && process.env.OPENAI_API_KEY)) {
     if (EMBEDDING_DIMENSION !== OPENAI_EMBEDDING_DIMENSION) {
       throw new Error('EMBEDDING_DIMENSION must be 1536 for OpenAI');
@@ -62,7 +60,6 @@ export function getLLMConfig(): LLMConfig {
     };
   }
 
-  // 以下是其他提供者的配置，保留不动
   if (process.env.TOGETHER_API_KEY) {
     if (EMBEDDING_DIMENSION !== TOGETHER_EMBEDDING_DIMENSION) {
       throw new Error('EMBEDDING_DIMENSION must be 768 for Together.ai');
@@ -144,7 +141,7 @@ export async function chatCompletion(
   body.model = body.model ?? config.chatModel;
   const stopWords = body.stop ? (typeof body.stop === 'string' ? [body.stop] : body.stop) : [];
   if (config.stopWords) stopWords.push(...config.stopWords);
-  console.log(body);
+  // console.log(body);
   const {
     result: content,
     retries,
@@ -177,7 +174,7 @@ export async function chatCompletion(
       if (content === undefined) {
         throw new Error('Unexpected result from OpenAI: ' + JSON.stringify(json));
       }
-      console.log(content);
+      // console.log(content);
       return content;
     }
   });
@@ -189,7 +186,6 @@ export async function chatCompletion(
   };
 }
 
-// 以下代码保持不变，直接保留
 export async function tryPullOllama(model: string, error: string) {
   if (error.includes('try pulling')) {
     console.error('Embedding model not found, pulling from Ollama');
@@ -240,7 +236,7 @@ export async function fetchEmbeddingBatch(texts: string[]) {
     return (await result.json()) as CreateEmbeddingResponse;
   });
   if (json.data.length !== texts.length) {
-    console.error(json);
+    // console.error(json);
     throw new Error('Unexpected number of embeddings');
   }
   const allembeddings = json.data;
