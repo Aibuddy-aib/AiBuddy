@@ -40,11 +40,13 @@ export const ACTIVITIES = [
 ];
 
 
-export const WORK_DURATION = 20 * 1000; // 20 seconds
-export const BASR_WORK_REWARD = 10; // 10 tokens
+export const WORK_DURATION = 4 * 60 * 60 * 1000; // 4 hours
+export const WORK_REWARD_INTERVAL = 60 * 1000; // 1 minute
+export const BASR_WORK_REWARD = 300; // 300 tokens
 
-export const RANDOM_EVENT_COUNT = 80;
-export const RANDOM_EVENT_PROBABILITY = 0.01;
+export const RANDOM_EVENT_COUNT = 5; // 5 events per day
+export const RANDOM_EVENT_PROBABILITY = 0.01; // 1% chance to trigger an event
+export const RANDOM_EVENT_INTERVAL = 60 * 60 * 1000; // 1 hour
 export const RANDOM_EVENTS = [
   // lucky events
   { title: 'Pick up a wallet', description: 'picked up a wallet full of AIB Token on the road.', type: 'income', amount: 20 },
@@ -75,7 +77,7 @@ export const ENGINE_ACTION_DURATION = 30000;
 // Bound the number of pathfinding searches we do per game step.
 export const MAX_PATHFINDS_PER_STEP = 10; // Reduced to 10, limit pathfinding calculations per step
 
-export const DEFAULT_NAME = 'Me';
+export const DEFAULT_NAME = 'Own';
 
 // Invite 60% of invites that come from other agents.
 export const INVITE_ACCEPT_PROBABILITY = 0.4; // Reduced to 0.4, reduce invitation acceptance probability
@@ -89,9 +91,12 @@ export const AWKWARD_CONVERSATION_TIMEOUT = 4 * 1000; // Increased to 4 seconds
 // Leave a conversation after participating too long.
 export const MAX_CONVERSATION_DURATION = 60_000; // Increased to 60 seconds
 
+export const DIRECT_CHAT_MAX_CONVERSATION_DURATION = 10 * 60 * 1000; // 10 minutes
+export const DIRECT_CHAT_COOLDOWN = 10; // 10 seconds
+
 // Leave a conversation if it has more than 8 messages;
 // export const MAX_CONVERSATION_MESSAGES = 6; // Reduced to 6 messages
-export const MAX_CONVERSATION_MESSAGES = 6; // Reduced to 3 messages
+export const MAX_CONVERSATION_MESSAGES = 3; // Reduced to 3 messages
 
 // Wait for before sending another message.
 export const MESSAGE_COOLDOWN = 3000; // Increased to 3000ms (3s)

@@ -4,7 +4,7 @@ import { parseGameId } from "./ids";
 import { Player } from "./player";
 import { point } from "../util/types";
 import { movePlayer, stopPlayer } from "./movement";
-import { RANDOM_EVENT_COUNT, RANDOM_EVENTS } from "../constants";
+import { RANDOM_EVENT_COUNT, RANDOM_EVENTS, RANDOM_EVENT_INTERVAL } from "../constants";
 import { Conversation } from "./conversation";
 import { PlayerAgent } from "./playerAgent";
 import { characters } from '../../data/characters';
@@ -16,10 +16,9 @@ export const playerInputs = {
       character: v.string(),
       description: v.string(),
       ethAddress: v.optional(v.string()),
-      playerId: v.optional(v.string()),
     },
     handler: (game, now, args) => {
-      Player.join(game, now, args.name, args.character, args.description, args.ethAddress, args.playerId);
+      Player.join(game, now, args.name, args.character, args.description, args.ethAddress);
       return null;
     },
   }),
@@ -82,7 +81,7 @@ export const playerInputs = {
       player.activity = {
         description: "Working",
         emoji: "👷",
-        until: (player.workStartTime || now) + 1000 * 20 // 20 seconds from the start time of the job
+        until: now + 1000
       };
       
       // Also update isWorking status and workStartTime in PlayerDescription
@@ -231,7 +230,7 @@ export const playerInputs = {
       
       // check event interval
       const eventInterval = now - (player.lastEventTime || 0);
-      if (eventInterval < 10000) { // 10 second interval
+      if (eventInterval < RANDOM_EVENT_INTERVAL) {
         return { success: false, message: 'Event interval too short' };
       }
       
@@ -272,13 +271,6 @@ export const playerInputs = {
       
       // Event tokens are controlled by game engine, can sync
       player.syncTokenToDatabase(game);
-      
-      // set activity
-      // player.activity = {
-      //   description: playerEvent.title,
-      //   emoji: tokenChange > 0 ? '💰' : '💸',
-      //   until: now + 3000, // Display for 3 seconds
-      // };
       
       // add event to pendingOperations
       game.pendingOperations.push({
@@ -415,15 +407,13 @@ export const playerInputs = {
   }),
   createPlayerAgent: inputHandler({
     args: {
-      // descriptionIndex: v.number(),
       name: v.string(),
-      playerId: v.string(),
       ethAddress: v.string(),
       character: v.string(),
       identity: v.string(),
     },
     handler: (game, now, args) => {
-      const { character, name: customName, identity, ethAddress, playerId: customPlayerId } = args;
+      const { character, name: customName, identity, ethAddress } = args;
       // const desc = Descriptions[descriptionIndex];
       const char = characters.find(c => c.name === character);
       if (!char) throw new Error(`Character ${character} not found`);
@@ -436,7 +426,7 @@ export const playerInputs = {
         character,
         identity,
         ethAddress,
-        customPlayerId,
+        // Don't pass customPlayerId, let game engine generate it
       );
       
       // ensure Player object has isWorking property
@@ -463,7 +453,19 @@ export const playerInputs = {
       );
       
       console.log(`Created player agent ${playerId}: ${customName}`);
-      return { playerId };
+      return {
+        playerId,
+        data: {
+          playerId: playerId,
+          name: customName,
+          ethAddress: ethAddress,
+          character: character,
+          identity: identity,
+          avatarPath: `/assets/${character}.png`,
+          createdAt: now, // This `now` is the game engine's `now`
+          updatedAt: now, // This `now` is the game engine's `now`
+        }
+      };
     },
   }),
 };
