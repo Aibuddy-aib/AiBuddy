@@ -166,14 +166,6 @@ export function Messages({
             </div>
           </div>
         )}
-        {humanPlayer && inConversationWithMe && conversation.kind === 'active' && (
-          <MessageInput
-            worldId={worldId}
-            engineId={engineId}
-            conversation={conversation.doc}
-            humanPlayer={humanPlayer}
-          />
-        )}
       </div>
     </div>
   );

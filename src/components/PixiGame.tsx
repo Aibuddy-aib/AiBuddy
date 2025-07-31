@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { useApp } from '@pixi/react';
 import { Player, SelectElement } from './Player.tsx';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PixiStaticMap } from './PixiStaticMap.tsx';
 import PixiViewport from './PixiViewport.tsx';
 import { Viewport } from 'pixi-viewport';
@@ -16,7 +16,6 @@ import { SHOW_DEBUG_UI } from './Game.tsx';
 import { ServerGame } from '../hooks/serverGame.ts';
 import { TokenDisplay } from './TokenDisplay.tsx';
 import { GameId } from '../../convex/aiTown/ids.ts';
-import { MouseEvent as ReactMouseEvent } from 'react';
 
 type PixiGameProps = {
   worldId: Id<'worlds'>;

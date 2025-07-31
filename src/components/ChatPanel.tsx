@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useQuery, useMutation } from 'convex/react';
+import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { Doc, Id } from '../../convex/_generated/dataModel';
+import { Id } from '../../convex/_generated/dataModel';
 import { toast } from 'react-toastify';
 import { useSendInput } from '../hooks/sendInput';
 import { toastOnError } from '../toasts';
 import { GameId } from '../../convex/aiTown/ids';
 
-// 定义头顶消息的类型
 interface HeadMessage {
   _id: string;
   playerId: string;
@@ -39,32 +38,32 @@ interface ChatPanelProps {
   engineId: Id<'engines'>;
   userData: any;
   userAddress?: string | null;
-  isMobile?: boolean; // 添加移动端标志
+  isMobile?: boolean;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, userData, userAddress, isMobile }) => {
-  // 获取localStorage中保存的折叠状态，如果没有则默认为false
+  // get saved collapse state from localStorage, default to false if not found
   const getSavedCollapseState = () => {
     try {
       const saved = localStorage.getItem('chatPanelCollapsed');
       return saved === 'true';
     } catch (e) {
-      // 如果访问localStorage出错，返回默认值
+      // if error accessing localStorage, return default value
       return false;
     }
   };
   
-  // 修改初始化状态，使用localStorage保存的状态，移动端下永不折叠
-  const [isCollapsed, setIsCollapsed] = useState(isMobile ? false : getSavedCollapseState());
-  // 记录上一次的设备类型
+  // modify initialization state, use saved state from localStorage, default to collapsed (button only)
+  const [isCollapsed, setIsCollapsed] = useState(isMobile ? true : (getSavedCollapseState() !== false));
+  // record last device type
   const wasMobile = useRef(false);
-  // 记录组件是否已初始化
+  // record if component has been initialized
   const isInitialized = useRef(false);
   
-  // 创建一个带有保存状态的setIsCollapsed函数
+  // create a setIsCollapsed function with saved state
   const setCollapsedWithSave = (collapsed: boolean) => {
     setIsCollapsed(collapsed);
-    // 保存到localStorage
+    // save to localStorage
     try {
       localStorage.setItem('chatPanelCollapsed', String(collapsed));
     } catch (e) {
@@ -72,21 +71,21 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
     }
   };
   
-  // 在组件挂载时检测是否为移动设备，并智能处理窗口大小变化
+  // detect if mobile device when component mounts, and handle window size changes intelligently
   useEffect(() => {
-    // 检测设备类型的函数
+    // function to detect device type
     const checkDeviceType = () => {
       const isMobile = window.matchMedia("(max-width: 768px)").matches;
       
-      // 首次加载时
+      // first load
       if (!isInitialized.current) {
-        // 只在开发环境输出日志
+        // only log in development environment
         if (process.env.NODE_ENV !== 'production') {
-          console.log("[ChatPanel] 首次加载 - 设备类型:", isMobile ? "移动设备" : "桌面设备");
+          console.debug("[ChatPanel] first load - device type:", isMobile ? "mobile" : "desktop");
         }
         
-        // 如果是移动设备且没有保存的状态，则折叠聊天栏
-        if (isMobile && !localStorage.getItem('chatPanelCollapsed')) {
+        // if mobile device, always collapse chat panel (show button only)
+        if (isMobile) {
           setCollapsedWithSave(true);
         }
         isInitialized.current = true;
@@ -94,36 +93,36 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
         return;
       }
       
-      // 处理窗口大小变化：从桌面变为移动设备
+      // handle window size change: from desktop to mobile
       if (!wasMobile.current && isMobile) {
-        // 只在开发环境输出日志
+        // only log in development environment
         if (process.env.NODE_ENV !== 'production') {
-          console.log("[ChatPanel] 设备类型变化: 从桌面切换到移动设备");
+          console.debug("[ChatPanel] device type changed: from desktop to mobile");
         }
         setCollapsedWithSave(true);
       }
       
-      // 更新设备类型记录
+      // update device type record
       wasMobile.current = isMobile;
     };
     
-    // 初始检测
+    // initial detection
     checkDeviceType();
     
-    // 监听窗口大小变化
+    // listen for window size changes
     window.addEventListener('resize', checkDeviceType);
     
-    // 清理函数
+    // cleanup function
     return () => {
       window.removeEventListener('resize', checkDeviceType);
     };
   }, []);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // 添加一个ref来记录前一次的消息数量
+  // add a ref to record previous message count
   const prevMessagesCountRef = useRef<number>(0);
   const [headMessage, setHeadMessage] = useState('');
-  // 添加发送状态标记
+  // add sending status marker
   const [isSending, setIsSending] = useState(false);
   
   // Get recent head messages history
@@ -138,15 +137,15 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
   // Get player information from userData
   const playerId = userData?.playerId as GameId<'players'> | undefined;
   
-  // 添加：从Convex数据库中获取用户信息，基于钱包地址
+  // add: get user information from Convex database, based on wallet address
   const playerData = useQuery(
     api.newplayer.getPlayerByEthAddress, 
     userAddress ? { ethAddress: userAddress } : 'skip'
   );
   
-  // 添加调试日志，帮助识别钱包连接问题
+  // add debug log to help identify wallet connection issues
   useEffect(() => {
-    // 使用ref跟踪钱包状态变化，避免重复日志
+    // use ref to track wallet status changes, avoid duplicate logs
     const walletStatus = {
       hasAddress: !!userAddress,
       hasPlayerData: !!playerData
@@ -154,53 +153,46 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
     
     const currentWalletStatus = JSON.stringify(walletStatus);
     
-    // 仅在开发环境和状态变化时输出日志
+    // only output log in development environment and when status changes
     if (process.env.NODE_ENV !== 'production' && 
-        prevWalletStatusRef.current !== currentWalletStatus) {
-      
-      console.log("[ChatPanel] 钱包连接状态:", { 
-        userAddress: userAddress ? userAddress.substring(0, 6) + '...' : null, 
-      playerDataLoaded: !!playerData,
-      playerName: playerData?.displayName || 'No Name'
-    });
-      
-      // 更新状态记录
+      prevWalletStatusRef.current !== currentWalletStatus) {     
+      // update status record
       prevWalletStatusRef.current = currentWalletStatus;
     }
   }, [userAddress, playerData]);
   
-  // 在组件顶部添加ref来跟踪钱包状态变化
+  // add a ref to track wallet status changes at the top of the component
   const prevWalletStatusRef = useRef<string | null>(null);
   
   // Get game state to access player name
   const worldState = useQuery(api.world.worldState, worldId ? { worldId } : 'skip');
-  let players = worldState?.world.players || [];
+  const players = worldState?.world.players || [];
   
-  // 添加调试日志，查看游戏中已有的玩家
+  // add debug log to check existing players in the game
   useEffect(() => {
     if (players.length > 0) {
-      // 修改：控制日志输出频率，仅在开发环境且玩家列表变化时才输出
-      // 使用ref追踪上次输出的玩家ID列表的哈希值
+      // modify: control log output frequency, only output in development environment and when player list changes
+      // use ref to track the hash value of the last output player ID list
       const currentPlayersHash = players.map(p => p.id).join(',');
       
-      // 只有在开发环境、首次加载或玩家列表变化时才输出日志
+      // only output log in development environment, first load or when player list changes
       if (process.env.NODE_ENV !== 'production' && 
           (!prevPlayersHashRef.current || 
           prevPlayersHashRef.current !== currentPlayersHash)) {
         
-        console.log("[ChatPanel] 玩家列表已更新:", players.map(p => ({ 
-          id: p.id.substring(0, 8) + '...', // 缩短ID显示
-        name: p.name,
-        isHuman: !!p.human
+        console.debug("[ChatPanel] player list updated:", players.map(p => ({ 
+          id: p.id.substring(0, 8) + '...', // shorten ID display
+          name: p.name,
+          isHuman: !!p.human
       })));
         
-        // 更新哈希值
+        // update hash value
         prevPlayersHashRef.current = currentPlayersHash;
       }
     }
   }, [players]);
   
-  // 在组件顶部添加ref来跟踪玩家列表变化
+  // add a ref to track player list changes at the top of the component
   const prevPlayersHashRef = useRef<string | null>(null);
   
   // Try to find the player using the ID from userData first
@@ -213,50 +205,50 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
   // Use sendInput hook to send head message
   const sendHeadMessage = useSendInput(engineId, 'sendHeadMessage');
   
-  // 添加：处理玩家注册
+  // add: handle player registration
   const registerAndSendMessage = async (message: string) => {
     try {
-      // 使用钱包地址作为临时用户的标识
+      // use wallet address as temporary user identifier
       const displayName = userAddress ? 
         `${userAddress.substring(0, 8)}...${userAddress.substring(userAddress.length - 6)}` : 
         'Unknown User';
       
-      // 显示加入游戏中的提示
+      // show toast to indicate trying to send as temporary user
       toast.info("Trying to send as temporary user...");
       
-      // 等待一些现有的游戏玩家加载
+      // wait for some existing game players to load
       if (players.length === 0) {
         toast.warning("No available characters in the game");
         return false;
       }
       
-      // 选择一个现有的NPC角色
+      // select an existing NPC character
       const npcPlayer = players.find(p => !p.human);
       if (!npcPlayer) {
         toast.warning("Cannot find available NPC character");
         return false;
       }
       
-      // 直接使用NPC的ID发送消息
+      // directly use NPC's ID to send message
       try {
-        // 将用户名添加到消息开头，确保消息看起来是从正确的用户发出的
-        // 由于系统会使用NPC的名字，所以我们需要在消息内容中包含真实的用户名
+        // add user name to message start, ensure message looks like it's from the correct user
+        // since system uses NPC's name, we need to include the real user name in the message content
         await sendHeadMessage({
           playerId: npcPlayer.id as GameId<'players'>,
-          message: `[${displayName} 说]: ${message}`
+          message: `[${displayName} says]: ${message}`
         });
         
-        // 只在开发环境输出日志
+        // only output log in development environment
         if (process.env.NODE_ENV !== 'production') {
-          console.log(`[ChatPanel] 通过NPC角色发送成功 (${npcPlayer.id.substring(0, 8)}...), 实际用户: ${displayName}`);
+          console.debug(`[ChatPanel] sent successfully through NPC character (${npcPlayer.id.substring(0, 8)}...), actual user: ${displayName}`);
         }
         return true;
       } catch (npcError) {
-        console.error("[ChatPanel] 通过NPC发送失败:", npcError);
+        console.error("[ChatPanel] failed to send through NPC:", npcError);
         return false;
       }
     } catch (error) {
-      console.error("[ChatPanel] 玩家注册失败:", error);
+      console.error("[ChatPanel] player registration failed:", error);
       return false;
     }
   };
@@ -268,13 +260,13 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
       return;
     }
     
-    // 设置发送状态为true
+    // set sending status to true
     setIsSending(true);
     
-    // 仅在开发环境输出调试信息
+    // only output log in development environment
     if (process.env.NODE_ENV !== 'production') {
-      console.log("[ChatPanel] 发送消息:", headMessage);
-      console.log("[ChatPanel] 调试信息:", {
+      console.debug("[ChatPanel] sending message:", headMessage);
+      console.debug("[ChatPanel] debug info:", {
         playerId: playerId ? playerId.substring(0, 8) + '...' : null,
         hasUserData: !!userData,
         hasHumanPlayer: !!humanPlayer,
@@ -285,7 +277,7 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
     }
     
     try {
-      // 修改逻辑：只有当userAddress完全不存在时才提示连接钱包
+      // modify logic: only show wallet connection prompt when userAddress is completely missing
       if (!userAddress) {
         console.error("No wallet connected");
         toast.error("Please connect your wallet to send messages");
@@ -293,83 +285,83 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
         return;
       }
       
-      // 获取用户名 - 用于在消息内容中明确标注
+      // get user name - used to clearly label in message content
       const displayName = userAddress ? 
-        userAddress.substring(0, 8) + '...' + userAddress.substring(userAddress.length - 6) : 
+        playerData?.name : 
         'Unknown User';
       
-      // 修改要发送的消息，使用中文格式
-      const formattedMessage = `[${displayName} 说]: ${headMessage.trim()}`;
+      // modify message to send, use Chinese format
+      const formattedMessage = `[${displayName} says]: ${headMessage.trim()}`;
       
-      // 获取playerID的新策略:
-      // 1. 优先使用已存在的playerId
-      // 2. 如果没有，则从humanPlayer中获取
-      // 3. 尝试从现有玩家列表中选择一个NPC作为代理发言
+      // get new playerID strategy:
+      // 1. use existing playerId first
+      // 2. if not, get from humanPlayer
+      // 3. try to select an NPC from existing player list as proxy speaker
       let playerIdToUse = playerId;
       let playerNameToLog = "Unknown";
       
-      // 如果没有playerId，但有humanPlayer，则使用humanPlayer.id
+      // if no playerId but has humanPlayer, use humanPlayer.id
       if (!playerIdToUse && humanPlayer) {
         playerIdToUse = humanPlayer.id as GameId<'players'>;
         playerNameToLog = humanPlayer.name || "Human Player";
         console.log(`Using humanPlayer ID: ${playerIdToUse} (${playerNameToLog})`);
       }
       
-      // 如果仍然没有playerID，尝试从玩家列表中找到一个可用的NPC
+      // if still no playerID, try to find an available NPC from player list
       if (!playerIdToUse && players.length > 0) {
-        // 优先选择非人类玩家
+        // prioritize non-human players
         const npcPlayer = players.find(p => !p.human);
         if (npcPlayer) {
           playerIdToUse = npcPlayer.id as GameId<'players'>;
           playerNameToLog = npcPlayer.name || "NPC Player";
-          // 只在开发环境输出日志
+          // only output log in development environment
           if (process.env.NODE_ENV !== 'production') {
-            console.log(`[ChatPanel] 使用现有NPC ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
+            console.debug(`[ChatPanel] using existing NPC ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
           }
         } else {
-          // 如果没有NPC，则使用任何可用的玩家
+          // if no NPC, use any available player
           playerIdToUse = players[0].id as GameId<'players'>;
           playerNameToLog = players[0].name || "Random Player";
-          // 只在开发环境输出日志
+          // only output log in development environment
           if (process.env.NODE_ENV !== 'production') {
-            console.log(`[ChatPanel] 使用随机玩家ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
+            console.debug(`[ChatPanel] using random player ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
           }
       }
       }
       
-      // 如果所有方法都无法获取有效的ID，显示错误
+      // if all methods fail to get valid ID, show error
       if (!playerIdToUse) {
-        console.error("[ChatPanel] 无法找到有效的玩家ID");
+        console.error("[ChatPanel] cannot find valid player ID");
         toast.error("Cannot send message: No available characters in the system");
         setIsSending(false);
         return;
       }
       
-      // 为了调试，输出最终使用的玩家ID（仅在开发环境）
+      // for debugging, output final used player ID (only in development environment)
       if (process.env.NODE_ENV !== 'production') {
-        console.log(`[ChatPanel] 最终使用的玩家ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
+        console.debug(`[ChatPanel] final used player ID: ${playerIdToUse.substring(0, 8)}... (${playerNameToLog})`);
       }
       
-      // 立即清空输入框
+      // immediately clear input box
       setHeadMessage('');
       
-      // 使用确定的playerIdToUse发送消息
+      // use determined playerIdToUse to send message
       try {
       await toastOnError(
         sendHeadMessage({
           playerId: playerIdToUse,
-            message: formattedMessage
+          message: formattedMessage
         })
       );
       
       toast.success("Message sent!");
       } catch (sendError: any) {
-        console.error("[ChatPanel] 消息发送失败:", sendError);
-        // 提供更具体的错误信息
+        console.error("[ChatPanel] message sending failed:", sendError);
+        // provide more specific error information
         if (sendError.message && sendError.message.includes("Invalid player ID")) {
           toast.error(`Invalid player ID (${playerIdToUse.substring(0, 8)}...), trying alternative method...`);
           
-          // 尝试注册一个临时玩家并发送消息
+          // try to register a temporary player and send message
           try {
             const success = await registerAndSendMessage(headMessage.trim());
             if (success) {
@@ -378,7 +370,7 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
               toast.error("Failed even with temporary character, please refresh");
             }
           } catch (retryError) {
-            console.error("[ChatPanel] 尝试使用临时角色发送失败:", retryError);
+            console.error("[ChatPanel] failed to send using temporary character:", retryError);
             toast.error("All sending attempts failed, please refresh and try again");
           }
         } else if (sendError.message && sendError.message.includes("Invalid game ID")) {
@@ -387,47 +379,47 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
           toast.error(`Sending failed: ${sendError.message || 'Server error'}`);
         }
       } finally {
-        // 无论成功还是失败，都重置发送状态
+        // reset sending status regardless of success or failure
         setIsSending(false);
       }
       
     } catch (error: any) {
       console.error("Message preparation failed:", error);
       toast.error(`Message sending failed: ${error?.message || 'Unknown error'}`);
-      // 恢复发送状态
+      // restore sending status
       setIsSending(false);
     }
   };
   
-  // 修改：滚动到底部当新消息到达时，避免初始加载自动滚动
+  // modify: scroll to bottom when new message arrives, avoid initial loading auto scroll
   useEffect(() => {
-    // 仅当聊天面板未折叠，且有消息，且消息数量增加时才滚动
+    // only scroll when chat panel is not collapsed, has messages, and message count increases
     if (!isCollapsed && headMessages.length > 0 && headMessages.length > prevMessagesCountRef.current) {
-      // 只有新消息到达（而不是初始加载）时才滚动
+      // only scroll when new message arrives (not initial loading)
       if (prevMessagesCountRef.current > 0) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
     }
-    // 更新前一次的消息数量
+    // update previous message count
     prevMessagesCountRef.current = headMessages.length;
   }, [headMessages, isCollapsed]);
   
-  // 将MessageItem优化为React.memo组件，减少渲染频率
+  // optimize MessageItem to React.memo component, reduce rendering frequency
   const MessageItem = React.memo(({ msg }: { msg: HeadMessage }) => {
-    // 修改正则表达式，同时支持中英文格式
-    const messagePattern = /\[(.*?) (?:says|说)\]:(.*)/;
+    // modify regex to support both Chinese and English formats
+    const messagePattern = /\[(.*?) (?:says)\]:(.*)/;
     const match = msg.message.match(messagePattern);
     
     let actualSender = msg.playerName;
     let actualMessage = msg.message;
     
-    // 如果消息格式符合 "[xxx says]: yyy" 或 "[xxx说]: yyy"，则提取出真实发送者和消息内容
+    // if message format matches "[xxx says]: yyy", extract actual sender and message content
     if (match && match.length >= 3) {
-      actualSender = match[1].trim(); // 提取发送者名称
-      actualMessage = match[2].trim(); // 提取实际消息内容
+      actualSender = match[1].trim(); // extract sender name
+      actualMessage = match[2].trim(); // extract actual message content
     }
     
-    // 检查当前登录用户是否为消息发送者
+    // check if current logged-in user is the message sender
     const isCurrentUser = userAddress && 
                           (actualSender.includes(userAddress.substring(0, 8)) || 
                            actualSender.includes(userAddress.substring(userAddress.length - 6)));
@@ -438,7 +430,7 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
           <div className="flex justify-between items-center mb-1">
             <span className="text-yellow-400 font-medium text-sm">
               {actualSender}
-              {isCurrentUser && <span className="ml-1 text-xs text-gray-300">(Me)</span>}
+              {isCurrentUser && <span className="ml-1 text-xs text-gray-300">(Own)</span>}
             </span>
             <span className="text-gray-400 text-xs">
               {formatTime(msg.timestamp)}
@@ -449,40 +441,41 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
       </div>
     );
   });
-  
+
   return (
-    <div className={`${!isMobile ? 'fixed right-0 top-0 h-screen' : 'h-full w-full'} flex flex-col transition-all duration-300 ease-in-out ${
-      isMobile ? '' : 'z-10'
-    } ${
-      !isMobile && isCollapsed ? 'w-36' : (isMobile ? 'w-full' : 'w-96')
-    }`}>
-      {!isMobile && isCollapsed ? (
+    <>
+      {/* Chat Button - Fixed in top-right corner */}
+      <div className="fixed top-0 right-0 z-20">
         <button 
-          className="bg-slate-800 text-white p-2 self-start h-10 flex items-center justify-center w-full"
+          className="bg-slate-800 text-white p-2 self-start h-10 flex items-center justify-center w-32"
           onClick={() => setCollapsedWithSave(false)}
         >
           <span className="mr-2">◀</span>
           <span className="font-medium">Chat</span>
         </button>
-      ) : (
+      </div>
+
+      {/* Chat Drawer - Slides in from right */}
+      <div className={`fixed right-0 top-0 h-screen z-30 flex flex-col transition-all duration-300 ease-in-out ${
+        isCollapsed ? 'translate-x-full' : 'translate-x-0'
+      } ${isMobile ? 'w-full' : 'w-96'}`}>
         <div className="flex flex-col h-full bg-slate-800 shadow-lg overflow-hidden">
-          {/* Header with title and collapse button in one row - 只在非移动端显示 */}
-          {!isMobile && (
-          <div className="bg-slate-700 py-2 px-4 text-white font-medium border-b border-slate-600 flex justify-between items-center">
-              <span>Chat ({headMessages.length})</span>
+          {/* Header with title and close button */}
+          <div className="bg-slate-700 py-3 px-4 text-white font-medium border-b border-slate-600 flex justify-between items-center">
+            <span>Chat ({headMessages.length})</span>
             <button 
-              className="text-white flex items-center justify-center"
+              className="text-white hover:text-gray-300 flex items-center justify-center transition-colors"
               onClick={() => setCollapsedWithSave(true)}
             >
-              ▶
+              ✕
             </button>
           </div>
-          )}
           
+          {/* Messages area */}
           <div className="flex-1 overflow-y-auto p-2 scrollbar" style={isMobile ? {paddingBottom: '120px'} : {}}>
             {headMessages.length === 0 ? (
               <div className="text-gray-400 text-center py-4 text-sm">
-                {isMobile ? 'No messages' : 'No messages'}
+                No messages yet
               </div>
             ) : (
               headMessages.map((msg) => (
@@ -492,22 +485,20 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
             <div ref={messagesEndRef} />
           </div>
           
-          {/* Send Head Message feature - always show it */}
+          {/* Send Message area */}
           <div className={`${isMobile ? 'fixed bottom-24 left-0 right-0 z-10 shadow-lg' : ''} bg-slate-900 border-t border-gray-700 p-3`}>
-            {/* 显示玩家名称 - 只在非移动端显示 */}
+            {/* Player name - only show on desktop */}
             {!isMobile && (
-            <div className="text-sm font-medium mb-2 text-yellow-400">
-                {userAddress ? 
-                  (`${userAddress.substring(0, 8)}...${userAddress.substring(userAddress.length - 6)}`) : 
-                  'Please connect wallet'}
-            </div>
+              <div className="text-sm font-medium mb-2 text-yellow-400">
+                {userAddress ? (playerData?.name) : 'Please connect wallet'}
+              </div>
             )}
             <div className="flex">
               <input
                 type="text"
                 value={headMessage}
                 onChange={(e) => setHeadMessage(e.target.value)}
-                placeholder={isMobile ? "Type message..." : "Type message here..."}
+                placeholder="Type message here..."
                 className="flex-1 rounded-l border border-gray-300 px-3 py-2 text-sm text-black"
                 maxLength={50}
                 onKeyPress={(e) => {
@@ -526,22 +517,30 @@ const ChatPanel: React.FC<ChatPanelProps> = React.memo(({ worldId, engineId, use
                 } text-white rounded-r px-3 py-2 text-sm`}
                 disabled={isSending}
               >
-                {isSending ? 'Sending...' : (isMobile ? 'Send' : 'Send')}
+                {isSending ? 'Sending...' : 'Send'}
               </button>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Backdrop overlay - only show when chat is open */}
+      {!isCollapsed && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setCollapsedWithSave(true)}
+        />
       )}
-    </div>
+    </>
   );
 }, (prevProps, nextProps) => {
-  // 比较函数，仅在关键属性变化时重新渲染
+  // compare function, only re-render when key properties change
   return (
     prevProps.worldId === nextProps.worldId &&
     prevProps.engineId === nextProps.engineId &&
     prevProps.userAddress === nextProps.userAddress &&
     prevProps.isMobile === nextProps.isMobile
-    // 注意：不比较userData，因为它可能频繁变化但不影响UI
+    // note: do not compare userData, it may change frequently but does not affect UI
   );
 });
 

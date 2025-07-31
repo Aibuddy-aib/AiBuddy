@@ -17,37 +17,43 @@ class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
-    // 更新状态，下一次渲染将显示备用UI
+    // Update state, next render will show fallback UI
     return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('错误边界捕获到错误:', error, errorInfo);
+    console.error('Error boundary caught error:', error, errorInfo);
     
-    // 这里可以记录错误到错误报告服务
-    // 例如: logErrorToService(error, errorInfo);
+    // If it's a PIXI-related error, try to clean up and reset
+    if (error.message.includes('removeEventListener') || error.message.includes('pixi')) {
+      console.log('Detected PIXI-related error, attempting cleanup...');
+      // Can add PIXI cleanup logic here
+    }
+    
+    // Can log error to error reporting service here
+    // Example: logErrorToService(error, errorInfo);
   }
 
   public render() {
     if (this.state.hasError) {
-      // 如果提供了自定义的fallback，则使用它
+      // If custom fallback is provided, use it
       if (this.props.fallback) {
         return this.props.fallback;
       }
       
-      // 否则使用默认的错误UI
+      // Otherwise use default error UI
       return (
         <div className="error-boundary p-4 bg-red-100 border border-red-400 text-red-700 rounded mb-4">
-          <h2 className="text-lg font-bold mb-2">出错了</h2>
+          <h2 className="text-lg font-bold mb-2">Error Occurred</h2>
           <details className="whitespace-pre-wrap">
-            <summary>查看详情</summary>
+            <summary>View Details</summary>
             <p className="mt-2 text-sm font-mono">{this.state.error && this.state.error.toString()}</p>
           </details>
           <button
             className="mt-4 bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
             onClick={() => window.location.reload()}
           >
-            刷新页面
+            Refresh Page
           </button>
         </div>
       );
