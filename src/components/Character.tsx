@@ -3,6 +3,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { AnimatedSprite, Container, Graphics, Text } from '@pixi/react';
 import * as PIXI from 'pixi.js';
 
+// Cache loaded spritesheets
+const spritesheetCache = new Map<string, Spritesheet>();
+
 export const Character = ({
   textureUrl,
   spritesheetData,
@@ -17,12 +20,13 @@ export const Character = ({
   speed = 0.1,
   lastMessage,
   characterName = '',
-  aibtoken,
+  // aibtoken,
   onClick,
   activity,
   isCurrentUser = false,
-  ethAddress = '',
+  // ethAddress = '',
   viewportInfo,
+  isWorking,
 }: {
   // Path to the texture packed image.
   textureUrl: string;
@@ -42,26 +46,31 @@ export const Character = ({
   isViewer?: boolean;
   // The speed of the animation. Can be tuned depending on the side and speed of the NPC.
   speed?: number;
-  // 角色最近的消息
   lastMessage?: string;
-  // 角色名称
   characterName?: string;
-  // AIB代币数量
   aibtoken?: number;
-  // 活动信息
   activity?: { description: string; emoji?: string; until: number; style?: { background?: string; color?: string } };
-  // 是否是当前登录用户的角色
   isCurrentUser?: boolean;
-  // 以太坊地址
   ethAddress?: string;
   onClick: () => void;
   viewportInfo: any;
+  isWorking?: boolean;
 }) => {
   const [spriteSheet, setSpriteSheet] = useState<Spritesheet>();
-  const lastRenderTime = useRef(0);
+  // const lastRenderTime = useRef(0);
   
   useEffect(() => {
     const parseSheet = async () => {
+      // Create cache key
+      const cacheKey = `${textureUrl}_${JSON.stringify(spritesheetData)}`;
+      
+      // Check cache
+      if (spritesheetCache.has(cacheKey)) {
+        setSpriteSheet(spritesheetCache.get(cacheKey)!);
+        return;
+      }
+      
+      // Create new spritesheet
       const sheet = new Spritesheet(
         BaseTexture.from(textureUrl, {
           scaleMode: PIXI.SCALE_MODES.NEAREST,
@@ -69,10 +78,13 @@ export const Character = ({
         spritesheetData,
       );
       await sheet.parse();
+      
+      // Cache result
+      spritesheetCache.set(cacheKey, sheet);
       setSpriteSheet(sheet);
     };
     void parseSheet();
-  }, []);
+  }, [textureUrl, spritesheetData]);
 
   // The first "left" is "right" but reflected.
   const roundedOrientation = Math.floor(orientation / 90);
@@ -105,11 +117,11 @@ export const Character = ({
       break;
   }
 
-  // 处理消息显示
+  // handle message display
   const displayMessage = lastMessage || '';
-  // 截断消息，限制长度
+  // truncate message, limit length
   const truncateMessage = (message: string): string => {
-    const maxLength = 120; // 增加最大长度以适应更大的对话气泡
+    const maxLength = 120; // increase max length to fit larger dialog bubble
     if (message.length <= maxLength) {
       return message;
     }
@@ -117,28 +129,28 @@ export const Character = ({
   };
   const shortenedMessage = truncateMessage(displayMessage);
 
-  // 使用计算的 isInViewport
+  // use calculated isInViewport
   const isInViewport = viewportInfo && typeof viewportInfo.isInViewport === 'function' 
     ? viewportInfo.isInViewport(x, y) 
-    : true; // 如果没有提供viewportInfo或方法，默认为可见
+    : true; // if no viewportInfo or method is provided, default to visible
 
-  // 计算角色名称显示所需的宽度
+  // calculate width required for character name display
   const calculateNameWidth = (name: string, isMe: boolean): number => {
-    // 考虑中文字符和英文字符的不同宽度
+    // consider different widths for Chinese and English characters
     let width = 0;
     for (let i = 0; i < name.length; i++) {
-      // 中文字符通常比英文字符宽
+      // Chinese characters are usually wider than English characters
       const char = name.charAt(i);
       if (/[\u4e00-\u9fa5]/.test(char)) {
-        width += 12; // 中文字符宽度
+        width += 12; // Chinese character width
       } else {
-        width += 7; // 英文字符宽度
+        width += 7; // English character width
       }
     }
     
-    // 如果是当前用户，需要考虑"(Me)"文本的宽度
-    const padding = 20; // 左右边距
-    const meTextWidth = isMe ? 30 : 0; // (Me)文本的宽度
+    // if current user, need to consider width of "(Me)" text
+    const padding = 20; // left and right margins
+    const meTextWidth = isMe ? 30 : 0; // width of "(Me)" text
     
     return width + padding + meTextWidth;
   };
@@ -149,8 +161,8 @@ export const Character = ({
       y={y} 
       interactive={true} 
       pointerdown={(e) => {
-        console.log("Character被点击:", characterName);
-        // 确保事件不会冒泡
+        console.log("Character clicked:", characterName);
+        // ensure event does not bubble
         e.stopPropagation();
         onClick();
       }} 
@@ -161,23 +173,23 @@ export const Character = ({
           <Graphics
             draw={(g) => {
               g.clear();
-              // 检查角色名称与当前用户名称是否匹配（忽略大小写）
+              // check if character name matches current user name (ignore case)
               const currentUserName = localStorage.getItem('currentUserName');
               const isNameMatch = isCurrentUser || (currentUserName !== null && 
                 characterName.toLowerCase() === currentUserName.toLowerCase());
               
-              // 如果名称匹配，使用黄色背景
+              // if name matches, use yellow background
               g.beginFill(isNameMatch ? 0xFFA500 : 0x000000, isNameMatch ? 1.0 : 0.7);
               
-              // 计算名称显示所需的宽度
-              const displayName = isNameMatch ? `${characterName} (Me)` : characterName;
+              // calculate width required for name display
+              // const displayName = isNameMatch ? `${characterName} (Me)` : characterName;
               const width = calculateNameWidth(characterName, isNameMatch);
-              const height = 22; // 增加高度使文本更加突出
+              const height = 22; // increase height to make text more prominent
               
               g.drawRoundedRect(-width/2, -height/2, width, height, 5);
               g.endFill();
               
-              // 添加边框使其更加突出
+              // add border to make it more prominent
               if (isNameMatch) {
                 g.lineStyle(1.5, 0xFFFFFF, 0.8);
                 g.drawRoundedRect(-width/2, -height/2, width, height, 5);
@@ -189,7 +201,8 @@ export const Character = ({
               const currentUserName = localStorage.getItem('currentUserName');
               const isNameMatch = isCurrentUser || (currentUserName !== null && 
                 characterName.toLowerCase() === currentUserName.toLowerCase());
-              return isNameMatch ? `${characterName} (Me)` : characterName;
+              const name = isNameMatch ? `${characterName} (Own)` : characterName;
+              return isWorking ? `👷 ${name}` : name;
             })()} 
             anchor={0.5}
             style={new PIXI.TextStyle({
@@ -219,7 +232,7 @@ export const Character = ({
               g.clear();
               g.beginFill(0xFFFFFF, 0.9);
               g.lineStyle(1, 0x000000, 0.5);
-              // 固定大小的气泡，适合三行文字
+              // fixed size bubble, suitable for three lines of text
               const width = 240;
               const height = 70;
               g.drawRoundedRect(-width/2, -height/2, width, height, 5);
@@ -245,25 +258,25 @@ export const Character = ({
       {isViewer && <ViewerIndicator />}
       {emoji && (
         <Container x={15} y={-20}>
-          {/* 钱袋子图标 */}
+          {/* money bag icon */}
           {emoji === '💰' && activity?.description ? (
-            // 如果是获得AIB代币的活动，同时显示钱袋子和代币数量
+            // if activity is about getting AIB tokens, show both money bag and token amount
             <Container>
-              {/* 显示钱袋子 */}
+              {/* show money bag */}
               <Text 
                 text={emoji} 
                 anchor={{ x: 0.5, y: 0.5 }}
                 scale={{ x: 0.7, y: 0.7 }}
               />
               
-              {/* 在钱袋子上方显示获取的代币数量 */}
+              {/* show token amount above money bag */}
               <Container y={-10}>
-                {/* 添加半透明黑色背景 */}
+                {/* add semi-transparent black background */}
                 <Graphics
                   draw={(g) => {
                     g.clear();
                     g.beginFill(0x000000, 0.5);
-                    const width = activity.description.length * 5 + 15; // 根据文本长度计算宽度
+                    const width = activity.description.length * 5 + 15; // calculate width based on text length
                     const height = 14;
                     g.drawRoundedRect(-width/2, -height/2, width, height, 3);
                     g.endFill();
@@ -287,7 +300,7 @@ export const Character = ({
               </Container>
             </Container>
           ) : (
-            // 其他emoji正常显示
+            // other emojis display normally
             <Text 
               text={emoji} 
               anchor={{ x: 0.5, y: 0.5 }}
@@ -297,13 +310,12 @@ export const Character = ({
         </Container>
       )}
       
-      {/* 显示活动对话框，当角色正在执行活动时，无论是否在说话 */}
+      {/* show activity dialog, when character is performing activity, regardless of whether they are speaking */}
       {activity && activity.until > Date.now() && (
         <Container y={isSpeaking ? -100 : -60}>
           <Graphics
             draw={(g) => {
               g.clear();
-              // 使用自定义背景色或默认白色
               const backgroundColor = activity.style?.background ? 
                 PIXI.utils.string2hex(activity.style.background) : 0xFFFFFF;
               g.beginFill(backgroundColor, 0.9);
@@ -320,7 +332,6 @@ export const Character = ({
             style={new PIXI.TextStyle({
               fontFamily: 'Arial',
               fontSize: 12,
-              // 使用自定义文本颜色或默认黑色
               fill: activity.style?.color ? 
                 PIXI.utils.string2hex(activity.style.color) : 0x000000,
               align: 'center',
