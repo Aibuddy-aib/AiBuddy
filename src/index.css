@@ -198,7 +198,7 @@ p[contenteditable='true']:empty::before {
 
 .scrollbar::-webkit-scrollbar-thumb {
   background: #334155;
-  /* Slightly brighter blue, like the highlighted part of the title bar */
+  /* Slightly brighter blue, like title bar highlight */
   border-radius: 0;
   border: 1px solid #475569;
   /* Add border to enhance 3D effect */
@@ -245,7 +245,7 @@ p[contenteditable='true']:empty::before {
   /* gray-400 with opacity */
 }
 
-/* Add white placeholder style */
+/* Add white placeholder styles */
 ::placeholder {
   color: rgba(255, 255, 255, 0.7) !important;
 }
@@ -262,7 +262,7 @@ p[contenteditable='true']:empty::before {
   color: rgba(255, 255, 255, 0.7) !important;
 }
 
-/* Add custom scrollbar style */
+/* Add custom scrollbar styles */
 .custom-scrollbar::-webkit-scrollbar {
   width: 8px;
 }
@@ -278,4 +278,185 @@ p[contenteditable='true']:empty::before {
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: #555;
+}
+
+/* World selector styles */
+.world-selector {
+  position: relative;
+  /* As part of container */
+  z-index: 10;
+  background: transparent;
+  /* Remove background, consistent with Official Website button */
+  border: none;
+  /* Remove outer border */
+  border-radius: 0;
+  /* Remove rounded corners */
+  padding: 0;
+  /* Remove all padding */
+  backdrop-filter: none;
+  /* Remove background blur */
+  max-width: 300px;
+  /* Increase max width to fit App layout */
+}
+
+.world-tabs {
+  display: flex;
+  gap: 4px;
+  /* Reduce tab spacing */
+  flex-wrap: nowrap;
+  /* Horizontal layout, no wrapping */
+  justify-content: flex-start;
+  /* Left align */
+}
+
+.world-tab {
+  background: #6b7280;
+  /* gray-500 - inactive state is gray */
+  border: none;
+  border-radius: 6px 6px 0px 0px;
+  padding: 6px 8px;
+  /* Reduce padding */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+  min-height: 40px;
+  /* Reduce minimum width */
+  position: relative;
+  color: #fff;
+  /* White text */
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.world-tab:hover {
+  background: #9ca3af;
+  /* gray-400 - brightens on hover */
+}
+
+.world-tab.active {
+  background: #fbbf24;
+  /* amber-400 - active state is orange-yellow */
+  color: #000;
+  font-weight: 600;
+  border-bottom: 3px solid #d97706;
+  /* Bottom border indicates active state */
+}
+
+.world-tab.disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+  background: #374151;
+  /* gray-700 - darker but still visible */
+  color: #9ca3af;
+  /* gray-400 - lighter text for contrast */
+  border: 1px solid #4b5563;
+  /* gray-600 border */
+}
+
+.world-tab.inactive {
+  opacity: 0.7;
+  cursor: not-allowed;
+  background: #4b5563;
+  /* gray-600 - deeper gray */
+  color: #d1d5db;
+  /* gray-300 - lighter text color */
+}
+
+.world-tab-content {
+  text-align: center;
+  font-family: 'VCR OSD Mono', monospace;
+  font-size: 14px;
+  /* Reduce font size */
+  line-height: 1.1;
+  /* Reduce line height */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+
+.world-name {
+  font-weight: bold;
+  margin-bottom: 1px;
+  /* Reduce spacing */
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 4px;
+  transition: all 0.2s ease;
+}
+
+.status-idle {
+  background-color: #10b981;
+  /* Green - idle */
+}
+
+.status-normal {
+  background-color: #f59e0b;
+  /* Yellow - normal */
+}
+
+.status-busy {
+  background-color: #ef4444;
+  /* Red - busy */
+}
+
+.status-full {
+  background-color: #7c3aed;
+  /* Purple - full */
+}
+
+.status-inactive {
+  background-color: #6b7280;
+  /* Gray - inactive state */
+}
+
+
+
+.world-tab.loading {
+  color: #888;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .world-selector {
+    /* Remove fixed positioning related styles */
+    padding: 0;
+    /* Remove all padding */
+    max-width: none;
+    /* Cancel width limit on mobile devices */
+  }
+
+  .world-tabs {
+    gap: 4px;
+  }
+
+  .world-tab {
+    min-width: 100px;
+    padding: 6px 8px;
+  }
+
+  .world-tab-content {
+    font-size: 10px;
+  }
+
+  .world-stats {
+    font-size: 8px;
+  }
+
+  .default-badge {
+    font-size: 7px;
+    padding: 1px 4px;
+  }
 }

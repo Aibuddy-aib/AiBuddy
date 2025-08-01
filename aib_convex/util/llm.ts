@@ -53,7 +53,7 @@ export function getLLMConfig(): LLMConfig {
     return {
       provider: 'openai',
       url: 'https://api.openai.com',
-      chatModel: process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o-mini', // 使用更高效的gpt-4o-mini模型
+      chatModel: process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o-mini',
       embeddingModel: process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-ada-002',
       stopWords: [],
       apiKey: process.env.OPENAI_API_KEY,
