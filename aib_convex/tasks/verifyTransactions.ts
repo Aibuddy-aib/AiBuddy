@@ -3,9 +3,7 @@ import { Id } from '../_generated/dataModel';
 import { PaymentStatus } from '../payment';
 import { api } from '../_generated/api';
 import { v } from 'convex/values';
-import { ConvexHttpClient } from 'convex/browser';
 
-// 定义类型
 interface PaymentRecord {
   _id: Id<'payments'>;
   txHash: string;
@@ -24,10 +22,9 @@ interface VerificationResult {
   alreadyProcessed?: boolean;
 }
 
-// 内部辅助函数 - 不导出
 async function validateSingleTransaction(ctx: any, payment: PaymentRecord): Promise<VerificationResult> {
   try {
-    // 验证交易
+    // verify transaction
     const result: any = await ctx.runAction(api.blockchain.verifyTransaction, {
       txHash: payment.txHash,
       expectedAmount: payment.amount,
@@ -35,13 +32,13 @@ async function validateSingleTransaction(ctx: any, payment: PaymentRecord): Prom
       paymentId: payment._id
     });
     
-    // 更新支付状态
+    // update payment status
     await ctx.runMutation(api.payment.updatePaymentStatus, {
       paymentId: payment._id,
       status: result.status
     });
     
-    console.log(`交易验证结果: ${JSON.stringify(result)}`);
+    console.log(`transaction verification result: ${JSON.stringify(result)}`);
     return {
       success: true,
       verified: result.verified,
@@ -49,7 +46,7 @@ async function validateSingleTransaction(ctx: any, payment: PaymentRecord): Prom
       paymentId: payment._id,
     };
   } catch (error: any) {
-    console.error(`验证交易失败: ${payment._id}`, error);
+    console.error(`transaction verification failed: ${payment._id}`, error);
     return { 
       success: false, 
       error: String(error),
@@ -58,24 +55,24 @@ async function validateSingleTransaction(ctx: any, payment: PaymentRecord): Prom
   }
 }
 
-// 验证单个交易
+// verify a single transaction
 export const verifyPendingTransaction = internalAction({
   args: {
     paymentId: v.id('payments')
   },
   handler: async (ctx, args): Promise<VerificationResult> => {
-    // 获取支付记录
+    // get payment record
     const payment = await ctx.runQuery(api.payment.getPaymentById, { 
       paymentId: args.paymentId 
     }) as PaymentRecord | null;
     
     if (!payment) {
-      console.log(`支付记录不存在: ${args.paymentId}`);
+      console.log(`payment record not found: ${args.paymentId}`);
       return { success: false, reason: "Payment not found" };
     }
     
     if (payment.status !== PaymentStatus.PENDING) {
-      console.log(`支付已处理，状态: ${payment.status}, ID: ${args.paymentId}`);
+      console.log(`payment already processed, status: ${payment.status}, ID: ${args.paymentId}`);
       return { success: true, alreadyProcessed: true };
     }
     
@@ -83,7 +80,7 @@ export const verifyPendingTransaction = internalAction({
   }
 });
 
-// 验证所有待处理交易
+// verify all pending transactions
 export const verifyAllPendingTransactions = internalAction({
   handler: async (ctx): Promise<{
     success: boolean;
@@ -92,34 +89,34 @@ export const verifyAllPendingTransactions = internalAction({
     error?: string;
   }> => {
     try {
-      // 获取所有待处理交易
+      // get all pending transactions
       const pendingPayments = await ctx.runQuery(api.payment.getPendingPayments, {}) as PaymentRecord[];
       
-      console.log(`发现 ${pendingPayments.length} 个待处理交易`);
+      console.log(`found ${pendingPayments.length} pending transactions`);
       
-      // 如果没有待处理交易，直接返回
+      // if there are no pending transactions, return
       if (pendingPayments.length === 0) {
         return { success: true, processedCount: 0 };
       }
       
       const results: VerificationResult[] = [];
       for (const payment of pendingPayments) {
-        // 处理每个待处理交易
+        // process each pending transaction
         const result = await validateSingleTransaction(ctx, payment);
         results.push(result);
         
-        // 添加短暂延迟，避免API速率限制
+        // add a short delay to avoid API rate limit
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       
-      console.log(`批量验证完成，结果: ${JSON.stringify(results)}`);
+      console.log(`batch verification completed, result: ${JSON.stringify(results)}`);
       return {
         success: true,
         processedCount: results.length,
         results
       };
     } catch (error: any) {
-      console.error("验证交易任务执行失败:", error);
+      console.error("transaction verification task failed:", error);
       return { success: false, processedCount: 0, error: String(error) };
     }
   }

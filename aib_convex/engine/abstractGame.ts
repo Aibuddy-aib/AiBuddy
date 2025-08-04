@@ -3,7 +3,6 @@ import { Doc, Id } from '../_generated/dataModel';
 import { ActionCtx, DatabaseReader, MutationCtx, internalQuery } from '../_generated/server';
 import { engine } from '../engine/schema';
 import { internal } from '../_generated/api';
-import { Descriptions, characters } from '../../data/characters'; // 修正路径
 
 export abstract class AbstractGame {
   abstract tickDuration: number;
@@ -35,9 +34,12 @@ export abstract class AbstractGame {
     const completedInputs = [];
 
     this.beginStep(currentTs);
+    const inputsCount = inputs.length;
+    let loopCount = 0;
 
     while (numTicks < this.maxTicksPerStep) {
       numTicks += 1;
+      loopCount += 1;
 
       const tickInputs = [];
       while (inputIndex < inputs.length) {
@@ -62,6 +64,7 @@ export abstract class AbstractGame {
         completedInputs.push({ inputId: input._id, returnValue });
       }
 
+      // the world are moving!!
       this.tick(currentTs);
 
       const candidateTs = currentTs + this.tickDuration;
@@ -78,8 +81,10 @@ export abstract class AbstractGame {
     this.engine.processedInputNumber = processedInputNumber;
     const { _id, _creationTime, ...engine } = this.engine;
     const engineUpdate = { engine, completedInputs, expectedGenerationNumber };
+    // save the step of the world
     await this.saveStep(ctx, engineUpdate);
 
+    // console.debug(`input number: ${inputsCount}, loop count: ${loopCount}`);
     console.debug(`Simulated from ${startTs} to ${currentTs} (${currentTs - startTs}ms)`);
   }
 }
@@ -137,49 +142,16 @@ export async function engineInsertInput(
     plan?: string;
   } & Record<string, any>,
 ): Promise<Id<'inputs'>> {
+  
   const now = Date.now();
+
   const prevInput = await ctx.db
     .query('inputs')
     .withIndex('byInputNumber', (q) => q.eq('engineId', engineId))
     .order('desc')
     .first();
+
   const number = prevInput ? prevInput.number + 1 : 0;
-
-  // 如果是 createAgent，直接创建 Agent
-  if (name === 'createAgent') {
-    console.log('Creating agent with:', args);
-    const { descriptionIndex, name: customName, identity, plan } = args;
-    if (descriptionIndex === undefined) throw new Error('descriptionIndex is required');
-    const desc = Descriptions[descriptionIndex];
-    const char = characters.find((c) => c.name === desc.character);
-    if (!char) throw new Error(`Character ${desc.character} not found`);
-
-    // 从 worldStatus 获取 worldId
-    const worldStatus = await ctx.db
-      .query('worldStatus')
-      .filter((q) => q.eq(q.field('engineId'), engineId))
-      .unique();
-    if (!worldStatus) throw new Error(`No worldStatus found for engine ${engineId}`);
-    const worldId = worldStatus.worldId;
-
-    const agent = {
-      id: `a:${Math.random().toString(36).substr(2, 9)}`,  // 生成唯一的 agent ID
-      worldId,
-      playerId: `p:${Math.random().toString(36).substr(2, 9)}`,  // 生成唯一的 player ID
-      name: customName ?? desc.name,
-      textureUrl: char.textureUrl,
-      spritesheetData: char.spritesheetData,
-      speed: char.speed,
-      state: 'idle',
-      identity: identity ?? desc.identity,
-      plan: plan ?? desc.plan,
-      lastConversation: undefined,
-      lastInviteAttempt: undefined,
-      inProgressOperation: undefined,
-      toRemember: undefined
-    };
-    await ctx.db.insert('agents', agent);
-  }
 
   const inputId = await ctx.db.insert('inputs', {
     engineId,
@@ -202,6 +174,7 @@ export const loadInputs = internalQuery({
       .query('inputs')
       .withIndex('byInputNumber', (q) =>
         q.eq('engineId', args.engineId).gt('number', args.processedInputNumber ?? -1),
+        // q.eq('engineId', args.engineId)
       )
       .order('asc')
       .take(args.max);
@@ -234,4 +207,29 @@ export async function applyEngineUpdate(
     input.returnValue = completedInput.returnValue;
     await ctx.db.replace(input._id, input);
   }
+
+  await archiveInputs(ctx, engineId, engine.processedInputNumber ?? 0);
+}
+
+async function archiveInputs(
+  ctx: MutationCtx,
+  engineId: Id<'engines'>,
+  processedInputNumber: number,
+) {
+  // archiving
+  const BATCH_SIZE = 200;
+  const processedInputs = await ctx.db
+    .query('inputs')
+    .withIndex('byInputNumber', q => q.eq('engineId', engineId)
+    .lt('number', processedInputNumber))
+    .order('asc')
+    .take(BATCH_SIZE)
+  if (processedInputs.length === 0) return;
+  for (const input of processedInputs) {
+    // this type can be archived
+    const { _id, _creationTime, ...rest } = input;
+    await ctx.db.insert('archivedInputs', rest);
+    await ctx.db.delete(input._id);
+  }
+  console.debug(`Archived and deleted ${processedInputs.length} processed inputs.`);
 }

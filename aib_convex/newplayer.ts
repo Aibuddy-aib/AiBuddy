@@ -2,8 +2,7 @@ import { v, ConvexError } from 'convex/values';
 import { mutation, query, internalMutation } from './_generated/server';
 import { internal } from './_generated/api';
 import { insertInput } from './aiTown/insertInput';
-import { WORK_DURATION, BASR_WORK_REWARD, SKILL_MAP } from './constants';
-import { DefaultDescription } from '../data/characters';
+import { WORK_DURATION, BASR_WORK_REWARD, SKILL_MAP, WORK_REWARD_INTERVAL } from './constants';
 
 // get player data by eth address
 export const getPlayerByEthAddress = query({
@@ -23,14 +22,39 @@ export const getPlayerByEthAddress = query({
 
 // get all players data, for debugging
 export const getAllPlayers = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    page: v.optional(v.number()),
+    pageSize: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     try {
-      const players = await ctx.db.query('newplayer').collect();
+      const page = args.page || 1;
+      const pageSize = args.pageSize || 20;
+      const offset = (page - 1) * pageSize;
+      
+      // Get total count first
+      const totalPlayers = await ctx.db.query('newplayer').collect();
+      const totalCount = totalPlayers.length;
+      const totalPages = Math.ceil(totalCount / pageSize);
+      
+      console.log(`[getAllPlayers] Page ${page}, PageSize ${pageSize}, Total ${totalCount}, TotalPages ${totalPages}`);
+      
+      // Get players for current page
+      const playersForPage = totalPlayers.slice(offset, offset + pageSize);
+      
+      if (playersForPage.length === 0) {
+        return {
+          players: [],
+          totalCount: 0,
+          totalPages: 0,
+          currentPage: page,
+          pageSize: pageSize,
+        };
+      }
       
       // Get work status for each player from playerDescriptions
       const playersWithWorkStatus = await Promise.all(
-        players.map(async (player) => {
+        playersForPage.map(async (player) => {
           // get player description
           const playerDescription = await ctx.db
             .query('playerDescriptions')
@@ -38,11 +62,11 @@ export const getAllPlayers = query({
             .filter((q) => q.eq(q.field('playerId'), player.playerId))
             .first();
 
-          // get random event count
+          // get random event count (limit to prevent excessive queries)
           const randomEvents = await ctx.db
             .query('events')
             .withIndex('byPlayer', (q) => q.eq('worldId', player.worldId).eq('playerId', player.playerId))
-            .collect();
+            .take(100); // Limit to 100 events per player
 
           const randomEventCount = randomEvents.length;
           
@@ -64,30 +88,88 @@ export const getAllPlayers = query({
         })
       );
       
-      return playersWithWorkStatus;
+      return {
+        players: playersWithWorkStatus,
+        totalCount: totalCount,
+        totalPages: totalPages,
+        currentPage: page,
+        pageSize: pageSize,
+      };
     } catch (error) {
       console.error("Error getting all players:", error);
-      return [];
+      const page = args.page || 1;
+      const pageSize = args.pageSize || 20;
+      return {
+        players: [],
+        totalCount: 0,
+        totalPages: 0,
+        currentPage: page,
+        pageSize: pageSize,
+      };
+    }
+  }
+});
+
+// Simple query to check player count
+export const getPlayerCount = query({
+  args: {},
+  handler: async (ctx) => {
+    try {
+      const totalPlayers = await ctx.db.query('newplayer').collect();
+      console.log(`[getPlayerCount] Total players in database: ${totalPlayers.length}`);
+      return {
+        count: totalPlayers.length,
+        players: totalPlayers.slice(0, 5).map(p => ({
+          _id: p._id,
+          name: p.name,
+          playerId: p.playerId,
+          worldId: p.worldId
+        }))
+      };
+    } catch (error) {
+      console.error("Error getting player count:", error);
+      return { count: 0, players: [] };
     }
   }
 });
 
 // get all agents
 export const getAllAgents = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    cursor: v.optional(v.string()),
+    numItems: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     try {
-      const agents = await ctx.db.query('agentDescriptions').collect();
-      return agents.map(agent => ({
+      const numItems = args.numItems || 20;
+      
+      const agentBatch = await ctx.db
+        .query('agentDescriptions')
+        .paginate({ 
+          cursor: args.cursor || null, 
+          numItems 
+        });
+      
+      const agents = agentBatch.page.map(agent => ({
         id: agent._id,
         name: agent.agentId,
         description: agent.worldId,
         identity: agent.identity,
         plan: agent.plan
       }));
+      
+      return {
+        agents,
+        isDone: agentBatch.isDone,
+        continueCursor: agentBatch.continueCursor,
+      };
     } catch (error) {
       console.error("Error getting all agents:", error);
-      return [];
+      return {
+        agents: [],
+        isDone: true,
+        continueCursor: null,
+      };
     }
   }
 });
@@ -126,57 +208,26 @@ export const debugDatabaseStatus = query({
   },
 });
 
-// register player
-export const registerPlayer = mutation({
+export const createPlayerRecord = mutation({
   args: {
-    name: v.string(),
-    ethAddress: v.string(),
+    playerId: v.string(),
+    newplayerData: v.any(),
     worldId: v.id('worlds'),
-    description: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const world = await ctx.db.get(args.worldId);
-    if (!world) {
-      throw new ConvexError(`Invalid world ID: ${args.worldId}`);
-    }
-
-    const player = world.players.find(p => p.ethAddress === args.ethAddress);
-    if (player) {
-      return { success: false, message: `Player already exists in this world: ${args.worldId}` };
-    }
-
-    // generate random avatar number (1-7) but skip Kurt's avatar (2)
-    // generate a random number between 1 and 7, then if it's 2 (Kurt), replace it with 8
-    // our choice range is [1,3,4,5,6,7,8], 7 options
-    const avatarNumber = Math.floor(Math.random() * 7) + 1;
-    // if it's 2 (Kurt), use 8 instead, otherwise keep the original number
-    const character = `f${avatarNumber === 2 ? 8 : avatarNumber}`;
-    const avatarPath = `/assets/${character}.png`;
-
-    // use world.nextId to generate playerId, ensure consistent with the game engine
-    const playerId = `p:${world.nextId}`;
-    
-    const newPlayerID = await ctx.db.insert('newplayer', {
-      playerId: playerId,
-      name: args.name,
-      ethAddress: args.ethAddress,
+    const newplayerId = await ctx.db.insert('newplayer', {
+      playerId: args.playerId,
+      name: args.newplayerData.name,
+      ethAddress: args.newplayerData.ethAddress,
       worldId: args.worldId,
       createdAt: now,
       updatedAt: now,
-      avatarPath: avatarPath,
+      avatarPath: args.newplayerData.avatarPath,
     });
 
-    await insertInput(ctx, args.worldId, 'createPlayerAgent', {
-      name: args.name,
-      playerId: playerId,
-      ethAddress: args.ethAddress,
-      character: character,
-      identity: args.description ?? DefaultDescription.identity,
-    });
-
-    const newplayer = await ctx.db.get(newPlayerID);
-    return { success: true, player: newplayer, worldId: args.worldId };
+    console.log(`[createPlayerRecord] Created newplayer record with ID:`, newplayerId);
+    return { success: true, newplayerId };
   },
 });
 
@@ -221,7 +272,7 @@ export const loginPlayer = mutation({
       })(),
       description: '',
       ethAddress: args.ethAddress,
-      playerId: player.playerId, // pass the correct playerId
+      // Don't pass playerId, let game engine generate it
     })
 
     return { success: true, player: player };
@@ -708,7 +759,7 @@ export const startWork = mutation({
           workStartTime: now
         };
         await ctx.db.patch(args.worldId, { players: updatedPlayers });
-        console.log(`Updated world.players for player ${playerDescription.name}: isWorking=true, workStartTime=${now}`);
+        console.log(`Updated world.players for player id: ${playerDescription.playerId}, name ${playerDescription.name}: isWorking=true, workStartTime=${now}`);
       }
     }
     
@@ -727,19 +778,18 @@ export const startWork = mutation({
       workStartTime: now
     });
     
-    const rewardInterval = 10000;
-    const totalIntervals = Math.floor(WORK_DURATION / rewardInterval);
+    const totalIntervals = Math.floor(WORK_DURATION / WORK_REWARD_INTERVAL);
     
-    for (let i = 1; i <= totalIntervals; i++) {
-      const delay = i * rewardInterval;
-      ctx.scheduler.runAfter(delay, internal.newplayer.distributeWorkReward, {
-        playerId: playerDescription.playerId,
-        worldId: args.worldId,
-        workStartTime: now,
-        currentTime: now + delay,
-        workRecordId: workRecordId
-      });
-    }
+    // 递归调度奖励分发，避免一次性调度太多函数
+    await ctx.scheduler.runAfter(0, internal.newplayer.scheduleWorkRewards, {
+      playerId: playerDescription.playerId,
+      worldId: args.worldId,
+      workStartTime: now,
+      workRecordId: workRecordId,
+      currentInterval: 1,
+      maxIntervals: totalIntervals,
+      rewardInterval: WORK_REWARD_INTERVAL
+    });
     
     ctx.scheduler.runAfter(WORK_DURATION, internal.newplayer.completeWork, {
       playerId: playerDescription.playerId,
@@ -749,6 +799,44 @@ export const startWork = mutation({
     
     console.log(`Started work for player ${playerDescription.name} via game engine with ${totalIntervals} reward distributions`);
     return { success: true };
+  }
+});
+
+// 递归调度奖励分发，避免一次性调度太多函数
+export const scheduleWorkRewards = internalMutation({
+  args: {
+    playerId: v.string(),
+    worldId: v.id('worlds'),
+    workStartTime: v.number(),
+    workRecordId: v.id('workCompleteRecords'),
+    currentInterval: v.number(),
+    maxIntervals: v.number(),
+    rewardInterval: v.number()
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    
+    // 分发当前间隔的奖励
+    await ctx.scheduler.runAfter(0, internal.newplayer.distributeWorkReward, {
+      playerId: args.playerId,
+      worldId: args.worldId,
+      workStartTime: args.workStartTime,
+      currentTime: now,
+      workRecordId: args.workRecordId
+    });
+    
+    // 如果还有更多间隔，递归调度下一个
+    if (args.currentInterval < args.maxIntervals) {
+      ctx.scheduler.runAfter(args.rewardInterval, internal.newplayer.scheduleWorkRewards, {
+        playerId: args.playerId,
+        worldId: args.worldId,
+        workStartTime: args.workStartTime,
+        workRecordId: args.workRecordId,
+        currentInterval: args.currentInterval + 1,
+        maxIntervals: args.maxIntervals,
+        rewardInterval: args.rewardInterval
+      });
+    }
   }
 });
 
@@ -858,11 +946,10 @@ export const distributeWorkReward = internalMutation({
         return { success: false, message: 'player description not found' };
       }
       
-      // calculate the number of tokens to distribute (every 10 seconds)
-      const rewardInterval = 10000;
+      // calculate the number of tokens to distribute (every 1 minute)
       
       // calculate the number of tokens to distribute (total reward / intervals)
-      const totalIntervals = WORK_DURATION / rewardInterval;
+      const totalIntervals = WORK_DURATION / WORK_REWARD_INTERVAL;
       const baseRewardPerInterval = BASR_WORK_REWARD / totalIntervals;
       
       // calculate the number of tokens to distribute this time

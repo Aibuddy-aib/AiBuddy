@@ -141,32 +141,32 @@ export class HistoricalObject<T extends Record<string, number>> {
     return packSampleRecord(this.fieldConfig, this.history);
   }
 
-  // 添加一个方法，创建当前历史记录的压缩副本
-  // 这不会修改原始历史记录，所以不会影响游戏运行时的体验
+  // add a method to create a compressed copy of the current history
+  // this will not modify the original history, so it will not affect the game running experience
   createOptimizedCopy(maxSamples: number = 30): HistoricalObject<T> {
-    // 创建一个新的HistoricalObject
+    // create a new HistoricalObject
     const optimized = new HistoricalObject<T>(this.fieldConfig, {...this.data});
     
-    // 复制所有历史记录，但限制每个字段的样本数量
+    // copy all history, but limit the number of samples for each field
     for (const fieldName in this.history) {
       const history = this.history[fieldName];
       if (!history || !history.samples || history.samples.length === 0) continue;
       
-      // 如果样本数量超过最大值，使用均匀采样
+      // if the number of samples exceeds the maximum, use uniform sampling
       if (history.samples.length > maxSamples) {
-        // 创建一个新的历史记录
+        // create a new history record
         optimized.history[fieldName] = {
           initialValue: history.initialValue,
           samples: []
         };
         
-        // 计算采样间隔
+        // calculate the sampling interval
         const step = history.samples.length / maxSamples;
         
-        // 始终保留第一个和最后一个样本点
+        // always keep the first and last sample points
         optimized.history[fieldName].samples.push(history.samples[0]);
         
-        // 均匀采样中间的点
+        // uniform sampling of the middle points
         for (let i = 1; i < maxSamples - 1; i++) {
           const index = Math.floor(i * step);
           if (index < history.samples.length) {
@@ -174,14 +174,14 @@ export class HistoricalObject<T extends Record<string, number>> {
           }
         }
         
-        // 添加最后一个样本
+        // add the last sample
         if (history.samples.length > 1) {
           optimized.history[fieldName].samples.push(
             history.samples[history.samples.length - 1]
           );
         }
       } else {
-        // 样本数量未超过限制，直接复制
+        // the number of samples is not exceeded, just copy
         optimized.history[fieldName] = {
           initialValue: history.initialValue,
           samples: [...history.samples]

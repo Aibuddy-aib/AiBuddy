@@ -8,8 +8,6 @@ import { api, internal } from '../_generated/api';
 import * as embeddingsCache from './embeddingsCache';
 import { GameId } from '../aiTown/ids';
 import { NUM_MEMORIES_TO_SEARCH } from '../constants';
-import { SerializedPlayer } from '../aiTown/player';
-import { SerializedAgent } from '../aiTown/agent';
 import { Memory } from './memory';
 
 const selfInternal = internal.agent.conversation;
@@ -160,7 +158,8 @@ export async function leaveConversationMessage(
     `You are ${player.name}, and you're currently in a conversation with ${otherPlayer.name}.`,
     `You want to leave the conversation now. Say goodbye in character as ${player.name}.`,
   ];
-  prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
+  // Don't include agent prompts for leave messages to avoid revealing agent identity
+  // prompt.push(...agentPrompts(otherPlayer, agent, otherAgent ?? null));
 
   const llmMessages: LLMMessage[] = [
     {
@@ -353,13 +352,42 @@ function stopWords(otherPlayer: string, player: string): string[] {
   return variants.flatMap((stop) => [stop + ':', stop.toLowerCase() + ':']);
 }
 
-// add retry logic helper function
+// add retry logic helper function with timeout
 async function chatCompletionWithRetry(options: any, maxRetries = 3): Promise<any> {
   let retries = 0;
+  const TIMEOUT_MS = 15000; // 15 seconds timeout
+  
   while (true) {
     try {
-      return await chatCompletion(options);
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Request timeout'));
+        }, TIMEOUT_MS);
+      });
+      
+      // Race between the actual request and timeout
+      const result = await Promise.race([
+        chatCompletion(options),
+        timeoutPromise
+      ]);
+      
+      return result;
     } catch (error: any) {
+      // Handle timeout errors
+      if (error.message === 'Request timeout') {
+        console.log(`API request timed out after ${TIMEOUT_MS}ms`);
+        if (retries < maxRetries) {
+          retries++;
+          console.log(`Retrying after timeout (${retries}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          continue;
+        } else {
+          console.log('Max retries reached for timeout, returning fallback message');
+          return { content: "I'm sorry, I'm having trouble responding right now. Let me think about this." };
+        }
+      }
+      
       // check if it's a rate limit error (429)
       if (error.message && error.message.includes('429') && retries < maxRetries) {
         retries++;
@@ -381,6 +409,21 @@ async function chatCompletionWithRetry(options: any, maxRetries = 3): Promise<an
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
+      
+      // Handle connection timeout errors
+      if (error.message && (error.message.includes('Connection timed out') || error.message.includes('tcp connect error'))) {
+        console.log(`Connection timeout error: ${error.message}`);
+        if (retries < maxRetries) {
+          retries++;
+          console.log(`Retrying after connection timeout (${retries}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 2000 * retries));
+          continue;
+        } else {
+          console.log('Max retries reached for connection timeout, returning fallback message');
+          return { content: "I'm sorry, I'm having trouble connecting right now. Let me try again later." };
+        }
+      }
+      
       // other errors or retries exhausted, throw error
       throw error;
     }

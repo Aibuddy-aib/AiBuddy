@@ -27,9 +27,10 @@ export class Conversation {
   };
   numMessages: number;
   participants: Map<GameId<'players'>, ConversationMembership>;
+  isDirectChat: boolean;
 
   constructor(serialized: SerializedConversation) {
-    const { id, creator, created, isTyping, lastMessage, numMessages, participants } = serialized;
+    const { id, creator, created, isTyping, lastMessage, numMessages, participants, isDirectChat } = serialized;
     this.id = parseGameId('conversations', id);
     this.creator = parseGameId('players', creator);
     this.created = created;
@@ -44,6 +45,7 @@ export class Conversation {
     };
     this.numMessages = numMessages;
     this.participants = parseMap(participants, ConversationMembership, (m) => m.playerId);
+    this.isDirectChat = isDirectChat;
   }
 
   tick(game: Game, now: number) {
@@ -119,7 +121,7 @@ export class Conversation {
     }
   }
 
-  static start(game: Game, now: number, player: Player, invitee: Player) {
+  static start(game: Game, now: number, player: Player, invitee: Player, skipDistanceCheck = false) {
     if (player.id === invitee.id) {
       throw new Error(`Can't invite yourself to a conversation`);
     }
@@ -136,8 +138,9 @@ export class Conversation {
     }
     
     // add distance check, ensure characters must be close to each other to start a conversation
+    // but allow skipping this check for direct chat
     const playerDistance = distance(player.position, invitee.position);
-    if (playerDistance > 20) {
+    if (!skipDistanceCheck && playerDistance > 20) {
       const reason = `Player ${player.name} is too far from ${invitee.name} to start a conversation (${playerDistance.toFixed(2)} units)`;
       console.log(reason);
       return { error: reason };
@@ -152,6 +155,7 @@ export class Conversation {
         created: now,
         creator: player.id,
         numMessages: 0,
+        isDirectChat: false,
         participants: [
           { playerId: player.id, invited: now, status: { kind: 'walkingOver' } },
           { playerId: invitee.id, invited: now, status: { kind: 'invited' } },
@@ -220,7 +224,7 @@ export class Conversation {
   }
 
   serialize(): SerializedConversation {
-    const { id, creator, created, isTyping, lastMessage, numMessages } = this;
+    const { id, creator, created, isTyping, lastMessage, numMessages, isDirectChat } = this;
     return {
       id,
       creator,
@@ -229,6 +233,7 @@ export class Conversation {
       lastMessage,
       numMessages,
       participants: serializeMap(this.participants),
+      isDirectChat,
     };
   }
 }
@@ -250,6 +255,7 @@ export const serializedConversation = {
       timestamp: v.number(),
     }),
   ),
+  isDirectChat: v.boolean(),
   numMessages: v.number(),
   participants: v.array(v.object(serializedConversationMembership)),
 };
