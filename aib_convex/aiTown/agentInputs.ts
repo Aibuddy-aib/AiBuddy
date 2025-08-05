@@ -5,7 +5,7 @@ import { Conversation, conversationInputs } from './conversation';
 import { movePlayer } from './movement';
 import { inputHandler } from './inputHandler';
 import { point } from '../util/types';
-import { Descriptions, characters } from '../../data/characters';
+import { characters } from '../../data/characters';
 import { AgentDescription } from './agentDescription';
 import { Agent } from './agent';
 
@@ -149,28 +149,77 @@ export const agentInputs = {
       return null;
     },
   }),
-  createAgent: inputHandler({
+  agentForceExitConversation: inputHandler({
     args: {
-      descriptionIndex: v.number(),
-      name: v.optional(v.string()),
-      identity: v.optional(v.string()),
-      plan: v.optional(v.string()),
+      agentId,
+      conversationId,
+      playerId: v.string(),
+      reason: v.string(),
+      operationId: v.string(),
+      timestamp: v.number(),
     },
     handler: (game, now, args) => {
-      const { descriptionIndex, name: customName, identity, plan } = args;
-      const desc = Descriptions[descriptionIndex];
-      const char = characters.find(c => c.name === desc.character);
-      if (!char) throw new Error(`Character ${desc.character} not found`);
+      const agentId = parseGameId('agents', args.agentId);
+      const agent = game.world.agents.get(agentId);
+      if (!agent) {
+        throw new Error(`Couldn't find agent: ${agentId}`);
+      }
+      const player = game.world.players.get(agent.playerId);
+      if (!player) {
+        throw new Error(`Couldn't find player: ${agent.playerId}`);
+      }
+      const conversationId = parseGameId('conversations', args.conversationId);
+      const conversation = game.world.conversations.get(conversationId);
+      
+      console.log(`Agent ${agentId} force exiting conversation ${conversationId} due to: ${args.reason}`);
+      
+      // clear inProgressOperation
+      if (agent.inProgressOperation && agent.inProgressOperation.operationId === args.operationId) {
+        delete agent.inProgressOperation;
+        console.log(`Cleared inProgressOperation for agent ${agentId}`);
+      }
+      
+      // handle message sending completion
+      if (conversation) {
+        conversationInputs.finishSendingMessage.handler(game, now, {
+          playerId: agent.playerId,
+          conversationId: args.conversationId,
+          timestamp: args.timestamp,
+        });
+        
+        // delete conversation from world
+        const deleted = game.world.conversations.delete(conversationId);
+        console.log(`Deleted conversation ${conversationId}: ${deleted}`);
+      }
+      
+      // set agent state
+      agent.lastConversation = now;
+      // do not set toRemember, avoid subsequent remember operations
+      
+      console.log(`Agent ${agentId} successfully force exited conversation ${conversationId}`);
+      
+      return null;
+    },
+  }),
+  createAgent: inputHandler({
+    args: {
+      character: v.string(),
+      name: v.string(),
+      identity: v.string(),
+      plan: v.string(),
+    },
+    handler: (game, now, args) => {
+      const { character, name: customName, identity, plan } = args;
+      const char = characters.find(c => c.name === character);
+      if (!char) throw new Error(`Character ${character} not found`);
 
-      // generate ethereum address and token amount
       const playerId = Player.join(
         game,
         now,
-        customName ?? desc.name,
-        desc.character,
-        identity ?? desc.identity,
+        customName,
+        character,
+        identity,
         undefined,
-        // ethAddress
       );
       
       // ensure Player object has isWorking property
@@ -191,13 +240,6 @@ export const agentInputs = {
         new Agent({
           id: agentId,
           playerId: playerId,
-          name: customName ?? desc.name,
-          textureUrl: char.textureUrl,
-          spritesheetData: char.spritesheetData,
-          speed: char.speed,
-          state: 'idle',
-          identity: identity ?? desc.identity,
-          plan: plan ?? desc.plan,
           inProgressOperation: undefined,
           lastConversation: undefined,
           lastInviteAttempt: undefined,
@@ -208,13 +250,13 @@ export const agentInputs = {
         agentId,
         new AgentDescription({
           agentId: agentId,
-          identity: identity ?? desc.identity,
-          plan: plan ?? desc.plan,
+          identity: identity,
+          plan: plan,
         }),
       );
       
       game.descriptionsModified = true; // mark descriptions as modified, ensure saving
-      console.log(`Created agent ${agentId}: ${customName ?? desc.name}`);
+      console.log(`Created agent ${agentId}: ${customName}`);
       return { agentId };
     },
   }),

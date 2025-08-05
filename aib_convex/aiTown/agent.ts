@@ -14,6 +14,7 @@ import {
   MESSAGE_COOLDOWN,
   MIDPOINT_THRESHOLD,
   PLAYER_CONVERSATION_COOLDOWN,
+  DIRECT_CHAT_MAX_CONVERSATION_DURATION,
 } from '../constants';
 import { FunctionArgs } from 'convex/server';
 import { MutationCtx, internalMutation, internalQuery } from '../_generated/server';
@@ -26,12 +27,6 @@ export const serializedAgent = {
   id: v.string(),
   playerId: v.string(),
   name: v.optional(v.string()),
-  textureUrl: v.optional(v.string()),
-  spritesheetData: v.optional(v.any()),
-  speed: v.optional(v.number()),
-  state: v.optional(v.string()),
-  identity: v.optional(v.string()),
-  plan: v.optional(v.string()),
   toRemember: v.optional(v.string()),
   lastConversation: v.optional(v.number()),
   lastInviteAttempt: v.optional(v.number()),
@@ -42,19 +37,11 @@ export const serializedAgent = {
       started: v.number(),
     }),
   ),
-  ethAddress: v.optional(v.string()),
-  aibtoken: v.optional(v.number()),
 };
 export type SerializedAgent = {
   id: string;
   playerId: string;
   name?: string;
-  textureUrl?: string;
-  spritesheetData?: any;
-  speed?: number;
-  state?: string;
-  identity?: string;
-  plan?: string;
   toRemember?: string;
   lastConversation?: number;
   lastInviteAttempt?: number;
@@ -63,19 +50,12 @@ export type SerializedAgent = {
     operationId: string;
     started: number;
   };
-  ethAddress?: string;
 };
 
 export class Agent {
   id: GameId<'agents'>;
   playerId: GameId<'players'>;
   name?: string;
-  textureUrl?: string;
-  spritesheetData?: any;
-  speed?: number;
-  state?: string;
-  identity?: string;
-  plan?: string;
   toRemember?: GameId<'conversations'>;
   lastConversation?: number;
   lastInviteAttempt?: number;
@@ -84,24 +64,16 @@ export class Agent {
     operationId: string;
     started: number;
   };
-  ethAddress?: string;
 
   constructor(data: SerializedAgent) {
     this.id = parseGameId('agents', data.id);
     this.playerId = parseGameId('players', data.playerId);
     this.name = data.name;
-    this.textureUrl = data.textureUrl;
-    this.spritesheetData = data.spritesheetData;
-    this.speed = data.speed;
-    this.state = data.state;
-    this.identity = data.identity;
-    this.plan = data.plan;
     this.toRemember =
       data.toRemember !== undefined ? parseGameId('conversations', data.toRemember) : undefined;
     this.lastConversation = data.lastConversation;
     this.lastInviteAttempt = data.lastInviteAttempt;
     this.inProgressOperation = data.inProgressOperation;
-    this.ethAddress = data.ethAddress;
   }
 
   getProgressOperation(playerId: string | undefined): string {
@@ -121,7 +93,7 @@ export class Agent {
     return player.aibtoken ?? 0;
   }
   
-  old_tick(game: Game, now: number) {
+  tick(game: Game, now: number) {
     const player = game.world.players.get(this.playerId);
     if (!player) {
       throw new Error(`Invalid player ID ${this.playerId}`);
@@ -165,7 +137,6 @@ export class Agent {
     // Check to see if we have a conversation we need to remember.
     if (this.toRemember) {
       // Fire off the action to remember the conversation.
-      // console.log(`Agent ${this.id} remembering conversation ${this.toRemember}`);
       this.startOperation(game, now, 'agentRememberConversation', 'agent', {
         worldId: game.worldId,
         playerId: this.playerId,
@@ -176,7 +147,7 @@ export class Agent {
       return;
     }
     if (conversation && member) {
-      const [otherPlayerId, otherMember] = [...conversation.participants.entries()].find(
+      const [otherPlayerId] = [...conversation.participants.entries()].find(
         ([id]) => id !== player.id,
       )!;
       const otherPlayer = game.world.players.get(otherPlayerId)!;
@@ -184,14 +155,12 @@ export class Agent {
         // Accept a conversation with another agent with some probability and with
         // a human unconditionally.
         if (otherPlayer.ethAddress || Math.random() < INVITE_ACCEPT_PROBABILITY) {
-          // console.log(`Agent ${player.id} accepting invite from ${otherPlayer.id}`);
           conversation.acceptInvite(game, player);
           // Stop moving so we can start walking towards the other player.
           if (player.pathfinding) {
             delete player.pathfinding;
           }
         } else {
-          // console.log(`Agent ${player.id} rejecting invite from ${otherPlayer.id}`);
           conversation.rejectInvite(game, now, player);
         }
         return;
@@ -199,7 +168,6 @@ export class Agent {
       if (member.status.kind === 'walkingOver') {
         // Leave a conversation if we've been waiting for too long.
         if (member.invited + INVITE_TIMEOUT < now) {
-          // console.log(`Giving up on invite to ${otherPlayer.id}`);
           conversation.leave(game, now, player);
           return;
         }
@@ -236,15 +204,14 @@ export class Agent {
           // Wait for the other player to finish typing.
           return;
         }
+        const messageUuid = crypto.randomUUID();
+        conversation.setIsTyping(now, player, messageUuid);
         if (!conversation.lastMessage) {
           const isInitiator = conversation.creator === player.id;
           const awkwardDeadline = started + AWKWARD_CONVERSATION_TIMEOUT;
           // Send the first message if we're the initiator or if we've been waiting for too long.
           if (isInitiator || awkwardDeadline < now) {
             // Grab the lock on the conversation and send a "start" message.
-            // console.log(`${player.id} initiating conversation with ${otherPlayer.id}.`);
-            const messageUuid = crypto.randomUUID();
-            conversation.setIsTyping(now, player, messageUuid);
             this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
               worldId: game.worldId,
               playerId: player.id,
@@ -261,11 +228,21 @@ export class Agent {
           }
         }
         // See if the conversation has been going on too long and decide to leave.
+        // In direct chat, no need max conversation messages, just leave when too long
+        if ((started + DIRECT_CHAT_MAX_CONVERSATION_DURATION) < now && conversation.isDirectChat) {
+          this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
+            worldId: game.worldId,
+            playerId: player.id,
+            agentId: this.id,
+            conversationId: conversation.id,
+            otherPlayerId: otherPlayer.id,
+            messageUuid,
+            type: 'leave',
+          });
+          return;
+        }
         const tooLongDeadline = started + MAX_CONVERSATION_DURATION;
-        if (tooLongDeadline < now || conversation.numMessages > MAX_CONVERSATION_MESSAGES) {
-          // console.log(`${player.id} leaving conversation with ${otherPlayer.id}.`);
-          const messageUuid = crypto.randomUUID();
-          conversation.setIsTyping(now, player, messageUuid);
+        if ((tooLongDeadline < now || conversation.numMessages > MAX_CONVERSATION_MESSAGES) && !conversation.isDirectChat) {
           this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
             worldId: game.worldId,
             playerId: player.id,
@@ -278,7 +255,7 @@ export class Agent {
           return;
         }
         // Wait for the awkward deadline if we sent the last message.
-        if (conversation.lastMessage.author === player.id) {
+        if (conversation.lastMessage.author === player.id && !conversation.isDirectChat) {
           const awkwardDeadline = conversation.lastMessage.timestamp + AWKWARD_CONVERSATION_TIMEOUT;
           if (now < awkwardDeadline) {
             return;
@@ -286,13 +263,14 @@ export class Agent {
         }
         // Wait for a cooldown after the last message to simulate "reading" the message.
         const messageCooldown = conversation.lastMessage.timestamp + MESSAGE_COOLDOWN;
-        if (now < messageCooldown) {
+        if (now < messageCooldown && !conversation.isDirectChat) {
+          return;
+        }
+        // if the conversation is direct chat, only the initiator can continue the conversation
+        if (conversation.isDirectChat && conversation.lastMessage.author != otherPlayer.id) {
           return;
         }
         // Grab the lock and send a message!
-        // console.log(`${player.id} continuing conversation with ${otherPlayer.id}.`);
-        const messageUuid = crypto.randomUUID();
-        conversation.setIsTyping(now, player, messageUuid);
         this.startOperation(game, now, 'agentGenerateMessage', 'agent', {
           worldId: game.worldId,
           playerId: player.id,
@@ -334,17 +312,10 @@ export class Agent {
       id: this.id,
       playerId: this.playerId,
       name: this.name,
-      textureUrl: this.textureUrl,
-      spritesheetData: this.spritesheetData,
-      speed: this.speed,
-      state: this.state,
-      identity: this.identity,
-      plan: this.plan,
       toRemember: this.toRemember,
       lastConversation: this.lastConversation,
       lastInviteAttempt: this.lastInviteAttempt,
       inProgressOperation: this.inProgressOperation,
-      ethAddress: this.ethAddress,
     };
   }
 }
@@ -353,6 +324,7 @@ interface AgentOperations {
   agentRememberConversation: any;
   agentGenerateMessage: any;
   agentDoSomething: any;
+  forceExitConversation: any;
 }
 
 export async function runAgentOperation(ctx: MutationCtx, operation: string, args: any) {
@@ -364,6 +336,9 @@ export async function runAgentOperation(ctx: MutationCtx, operation: string, arg
     case 'agentGenerateMessage':
       reference = internal.aiTown.agentOperations.agentGenerateMessage;
       break;
+    case 'forceExitConversation':
+      reference = internal.aiTown.agent.forceExitConversation;
+      break;
     case 'agentDoSomething':
       reference = internal.aiTown.agentOperations.agentDoSomething;
       break;
@@ -372,6 +347,37 @@ export async function runAgentOperation(ctx: MutationCtx, operation: string, arg
   }
   await ctx.scheduler.runAfter(0, reference, args);
 }
+
+export const forceExitConversation = internalMutation({
+  args: {
+    worldId: v.id('worlds'),
+    agentId: v.string(),
+    playerId: v.string(),
+    conversationId: v.string(),
+    reason: v.string(),
+    operationId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // send a message to the conversation
+    await ctx.db.insert('messages', {
+      conversationId: args.conversationId,
+      author: args.playerId,
+      text: `sorry, ${args.reason}. I'm leaving the conversation.`,
+      messageUuid: crypto.randomUUID(),
+      worldId: args.worldId,
+    });
+    
+    // immediately clear the conversation state
+    await insertInput(ctx, args.worldId, 'agentForceExitConversation', {
+      conversationId: args.conversationId,
+      agentId: args.agentId,
+      playerId: args.playerId,
+      reason: args.reason,
+      operationId: args.operationId,
+      timestamp: Date.now(),
+    });
+  },
+});
 
 export const agentSendMessage = internalMutation({
   args: {

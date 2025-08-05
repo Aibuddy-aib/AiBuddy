@@ -13,6 +13,7 @@ import { PlayerDescription, serializedPlayerDescription } from './playerDescript
 import { Location, locationFields, playerLocation } from './location';
 import { runAgentOperation } from './agent';
 import { runPlayerOperation } from './player';
+import { runPlayerAgentOperation } from './playerAgent';
 import { GameId, IdTypes, allocGameId } from './ids';
 import { InputArgs, InputNames, inputs } from './inputs';
 import {
@@ -40,7 +41,7 @@ const gameStateDiff = v.object({
   playerDescriptions: v.optional(v.array(v.object(serializedPlayerDescription))),
   agentDescriptions: v.optional(v.array(v.object(serializedAgentDescription))),
   worldMap: v.optional(v.object(serializedWorldMap)),
-  operations: v.array(v.object({ name: v.string(), type: v.union(v.literal('agent'), v.literal('player')), args: v.any() })),
+  operations: v.array(v.object({ name: v.string(), type: v.union(v.literal('agent'), v.literal('player'), v.literal('playerAgent')), args: v.any() })),
 });
 type GameStateDiff = Infer<typeof gameStateDiff>;
 
@@ -56,7 +57,7 @@ export class Game extends AbstractGame {
   worldMap: WorldMap;
   playerDescriptions: Map<GameId<'players'>, PlayerDescription>;
   agentDescriptions: Map<GameId<'agents'>, AgentDescription>;
-  pendingOperations: Array<{ name: string; type: 'agent' | 'player'; args: any }> = [];
+  pendingOperations: Array<{ name: string; type: 'agent' | 'player' | 'playerAgent'; args: any }> = [];
   numPathfinds: number;
   pendingHeadMessage?: {
     playerId: GameId<'players'>;
@@ -155,7 +156,7 @@ export class Game extends AbstractGame {
     return id;
   }
 
-  scheduleOperation(name: string, type: 'agent' | 'player', args: unknown) {
+  scheduleOperation(name: string, type: 'agent' | 'player' | 'playerAgent', args: unknown) {
     this.pendingOperations.push({ name, type, args });
   }
 
@@ -184,6 +185,9 @@ export class Game extends AbstractGame {
     for (const player of this.world.players.values()) {
       player.tick(this, now);
     }
+    for (const playerAgent of this.world.playerAgents.values()) {
+      playerAgent.tick(this, now);
+    }
     
     for (const player of this.world.players.values()) {
       player.tickPathfinding(this, now);
@@ -197,7 +201,7 @@ export class Game extends AbstractGame {
       conversation.tick(this, now);
     }
     for (const agent of this.world.agents.values()) {
-      agent.old_tick(this, now);
+      agent.tick(this, now);
     }
     
     // historical location recording is also optimized
@@ -213,7 +217,7 @@ export class Game extends AbstractGame {
   }  
 
   async saveStep(ctx: ActionCtx, engineUpdate: EngineUpdate): Promise<void> {
-    const diff = this.old_takeDiff();
+    const diff = this.takeDiff();
     
     // save head message
     if (this.pendingHeadMessage) {
@@ -251,7 +255,7 @@ export class Game extends AbstractGame {
     });
   }    
 
-  old_takeDiff(): GameStateDiff {
+  takeDiff(): GameStateDiff {
     const historicalLocations = [];
     let bufferSize = 0;
     for (const [id, historicalObject] of this.historicalLocations.entries()) {
@@ -275,7 +279,6 @@ export class Game extends AbstractGame {
       world: { ...this.world.serialize(), historicalLocations },
       operations: this.pendingOperations,
     };
-    console.log(`Pending operations: ${this.pendingOperations.length}`);
     this.pendingOperations = [];
     
     if (this.descriptionsModified) {
@@ -287,7 +290,7 @@ export class Game extends AbstractGame {
     return result;
   }
 
-  static async old_saveDiff(ctx: MutationCtx, worldId: Id<'worlds'>, diff: GameStateDiff) {
+  static async saveDiff(ctx: MutationCtx, worldId: Id<'worlds'>, diff: GameStateDiff) {
     const existingWorld = await ctx.db.get(worldId);
     if (!existingWorld) {
       throw new Error(`No world found with id ${worldId}`);
@@ -383,7 +386,7 @@ export class Game extends AbstractGame {
     }
     // Start the desired agent operations.
     if (!diff.operations || diff.operations.length === 0) {
-      console.debug("No proxy operations need to be performed");
+      // console.debug("No proxy operations need to be performed");
       return;
     }
     for (const operation of diff.operations) {
@@ -391,6 +394,8 @@ export class Game extends AbstractGame {
         await runAgentOperation(ctx, operation.name, operation.args);
       } else if (operation.type === 'player') {
         await runPlayerOperation(ctx, operation.name, operation.args);
+      } else if (operation.type === 'playerAgent') {
+        await runPlayerAgentOperation(ctx, operation.name, operation.args);
       }
     }
   }
@@ -419,7 +424,7 @@ export const saveWorld = internalMutation({
       await applyEngineUpdate(ctx, args.engineId, args.engineUpdate);
       
       // then save world differences - now saveDiff method has been optimized to batch processing
-      await Game.old_saveDiff(ctx, args.worldId, args.worldDiff);
+      await Game.saveDiff(ctx, args.worldId, args.worldDiff);
       
       // console.log("World saved successfully, using batch processing");
     } catch (error: any) {
