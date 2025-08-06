@@ -88,14 +88,6 @@ export const PixiStaticMap = PixiComponent('StaticMap', {
         ctile.x = xPx;
         ctile.y = yPx;
         
-        // return to the simplest and most direct method
-        // based on the rotation and flip flags in the Tiled official documentation
-        
-        // print debug information to help understand specific rotation combinations
-        if (flippedHorizontally || flippedVertically || flippedDiagonally) {
-          console.log(`tile ID: ${actualTileIndex}, H:${flippedHorizontally}, V:${flippedVertically}, D:${flippedDiagonally}`);
-        }
-        
         // implement the rotation behavior of the Tiled tile editor
         // first handle diagonal flip (equivalent to 90 degree rotation and possible flip)
         if (flippedDiagonally) {

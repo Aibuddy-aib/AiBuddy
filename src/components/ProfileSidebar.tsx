@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { api } from '../../convex/_generated/api';
 import { useMutation, useQuery } from 'convex/react';
 import { toast } from 'react-hot-toast';
@@ -56,6 +56,8 @@ function ProfileSidebar({
   const [userSkill, setUserSkill] = useState<string | null>(null);
   const [userUsedSkills, setUserUsedSkills] = useState<string[]>([]);
   const [isBlindBoxOpen, setIsBlindBoxOpen] = useState<boolean>(false);
+  const [isStartWorkingLoading, setIsStartWorkingLoading] = useState<boolean>(false);
+  const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);
   
   const [isWorkCompleteModalOpen, setIsWorkCompleteModalOpen] = useState<boolean>(false);
   const [workCompleteInfo, setWorkCompleteInfo] = useState<{
@@ -74,6 +76,22 @@ function ProfileSidebar({
   // start work mutation
   const startWorkMutation = useMutation(api.newplayer.startWork);
 
+  // handle connect wallet with loading state
+  const handleConnectWallet = async () => {
+    if (isConnectingWallet) return;
+    
+    setIsConnectingWallet(true);
+    try {
+      if (onConnectWallet) {
+        await onConnectWallet();
+      }
+    } catch (error) {
+      console.error('Failed to connect wallet:', error);
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  };
+  
   const worldState = useQuery(api.world.worldState, worldId ? { worldId } : 'skip');
   const players = worldState?.world.players || [];
   
@@ -152,7 +170,9 @@ function ProfileSidebar({
         const now = Date.now();
         const elapsed = now - workStatus.startTime;
         const remaining = Math.max(0, WORK_DURATION - elapsed);
-        const progress = Math.min(100, (elapsed / WORK_DURATION) * 100);
+        // if work is completed, set progress to 100
+        const actualProgress = (elapsed / WORK_DURATION) * 100;
+        const progress = remaining <= 0 ? 100 : Math.min(99, actualProgress);
         
         setWorkProgress(progress);
         setTimeRemaining(formatTimeRemaining(remaining));
@@ -299,11 +319,12 @@ function ProfileSidebar({
 
   // handle start working button click
   const handleStartWorking = async () => {
-    if (isWorking) {
-      console.log("[ProfileSidebar] user is already working, cannot start again");
+    if (isWorking || isStartWorkingLoading) {
+      console.log("[ProfileSidebar] user is already working or loading, cannot start again");
       return;
     }
     
+    setIsStartWorkingLoading(true);
     try {
       console.log("[ProfileSidebar] start working");
       
@@ -314,13 +335,15 @@ function ProfileSidebar({
       
       if (result.success) {
         toast.success("Work started!");
-        console.log("[ProfileSidebar] work started successfully");
+        // console.log("[ProfileSidebar] work started successfully");
       } else {
         toast.error("Failed to start work");
       }
     } catch (error) {
-      console.error("[ProfileSidebar] start work failed:", error);
-        toast.error("Failed to start work, please try again");
+      // console.error("[ProfileSidebar] start work failed:", error);
+      toast.error("Failed to start work, please try again");
+    } finally {
+      setIsStartWorkingLoading(false);
     }
   };
 
@@ -462,43 +485,93 @@ function ProfileSidebar({
           Welcome to Ai Buddy World, where you can log in with your web3 wallet address and adopt your very own Ai Buddy!
         </p>
         <button
-          onClick={onConnectWallet}
-          className="w-full py-3 bg-blue-500 hover:bg-blue-600 rounded-md text-sm font-medium mb-3 flex items-center justify-center"
+          onClick={handleConnectWallet}
+          disabled={isConnectingWallet}
+          className={`w-full py-3 rounded-md text-sm font-medium mb-3 flex items-center justify-center ${
+            isConnectingWallet
+              ? 'bg-gray-600 cursor-not-allowed'
+              : 'bg-blue-500 hover:bg-blue-600'
+          }`}
         >
-          <svg width="20" height="20" viewBox="0 0 256 417" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid" className="mr-2">
-            <path fill="currentColor" d="M127.961 0l-2.795 9.5v275.668l2.795 2.79 127.962-75.638z"/>
-            <path fill="currentColor" d="M127.962 0L0 212.32l127.962 75.639V154.158z"/>
-            <path fill="currentColor" d="M127.961 312.183l-1.575 1.92v98.199l1.575 4.6L256 236.587z"/>
-            <path fill="currentColor" d="M127.962 416.902V312.183L0 236.587z"/>
-            <path fill="currentColor" d="M127.961 287.958l127.96-75.637-127.96-58.162z"/>
-            <path fill="currentColor" d="M0 212.32l127.962 75.638v-133.8z"/>
-          </svg>
-          Connect Ethereum Wallet
+          {isConnectingWallet ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Connecting...
+            </>
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 256 417" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid" className="mr-2">
+                <path fill="currentColor" d="M127.961 0l-2.795 9.5v275.668l2.795 2.79 127.962-75.638z"/>
+                <path fill="currentColor" d="M127.962 0L0 212.32l127.962 75.639V154.158z"/>
+                <path fill="currentColor" d="M127.961 312.183l-1.575 1.92v98.199l1.575 4.6L256 236.587z"/>
+                <path fill="currentColor" d="M127.962 416.902V312.183L0 236.587z"/>
+                <path fill="currentColor" d="M127.961 287.958l127.96-75.637-127.96-58.162z"/>
+                <path fill="currentColor" d="M0 212.32l127.962 75.638v-133.8z"/>
+              </svg>
+              Connect Ethereum Wallet
+            </>
+          )}
         </button>
+        {/* Temporarily disabled Solana wallet connection
         <div className="text-center text-gray-400 text-xs my-2">- Or -</div>
         <button
           onClick={() => {
-            // directly trigger Solana wallet connection, not relying on selector
-            const solanaConnectBtn = document.getElementById('solana-connect-button')?.querySelector('.wallet-adapter-button');
-            if (solanaConnectBtn instanceof HTMLElement) {
-              solanaConnectBtn.click();
-            } else {
-              toast.error("Solana wallet component not loaded correctly, please refresh the page and try again");
-              console.error("Solana wallet connection button not found");
+            if (isConnectingWallet) return;
+            
+            setIsConnectingWallet(true);
+            try {
+              // directly trigger Solana wallet connection, not relying on selector
+              const solanaConnectBtn = document.getElementById('solana-connect-button')?.querySelector('.wallet-adapter-button');
+              if (solanaConnectBtn instanceof HTMLElement) {
+                solanaConnectBtn.click();
+              } else {
+                toast.error("Solana wallet component not loaded correctly, please refresh the page and try again");
+                console.error("Solana wallet connection button not found");
+              }
+            } catch (error) {
+              console.error('Failed to connect Solana wallet:', error);
+            } finally {
+              // Note: Solana wallet connection is handled asynchronously, 
+              // so we don't reset loading state here
+              // It will be reset when the wallet connection callback is triggered
             }
           }}
-          className="w-full py-3 bg-purple-500 hover:bg-purple-600 rounded-md text-sm font-medium flex items-center justify-center"
+          disabled={isConnectingWallet}
+          className={`w-full py-3 rounded-md text-sm font-medium flex items-center justify-center ${
+            isConnectingWallet
+              ? 'bg-gray-600 cursor-not-allowed'
+              : 'bg-purple-500 hover:bg-purple-600'
+          }`}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="mr-2">
-            <path fill="currentColor" d="M6.425 3.952H17.55L15.075 7.7H3.95L6.425 3.952ZM8.8 8.7H19.925L17.45 12.45H6.325L8.8 8.7ZM11.2 13.45H22.325L19.85 17.2H8.725L11.2 13.45Z"/>
-          </svg>
-          Connect Solana Wallet
+          {isConnectingWallet ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Connecting...
+            </>
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="mr-2">
+                <path fill="currentColor" d="M6.425 3.952H17.55L15.075 7.7H3.95L6.425 3.952ZM8.8 8.7H19.925L17.45 12.45H6.325L8.8 8.7ZM11.2 13.45H22.325L19.85 17.2H8.725L11.2 13.45Z"/>
+              </svg>
+              Connect Solana Wallet
+            </>
+          )}
         </button>
+        */}
         
         {/* hidden Solana wallet component, for actual connection functionality */}
         <div id="solana-connect-button" className="hidden">
           <SolanaWalletConnect 
             onWalletConnect={(address) => {
+              // Reset loading state when wallet is connected
+              setIsConnectingWallet(false);
+              
               // call the onSolanaWalletConnect function when wallet is connected
               if (onSolanaWalletConnect) {
                 onSolanaWalletConnect(address);
@@ -507,6 +580,10 @@ function ProfileSidebar({
                 // if no callback function is provided, refresh page
                 window.location.reload(); 
               }
+            }}
+            onWalletDisconnect={() => {
+              // Reset loading state when wallet is disconnected
+              setIsConnectingWallet(false);
             }}
           />
         </div>
@@ -1036,9 +1113,24 @@ function ProfileSidebar({
                 </div>
                 <button
                   onClick={handleStartWorking}
-                  className="w-full py-2 bg-green-600 hover:bg-green-700 rounded text-white font-medium"
+                  disabled={isStartWorkingLoading}
+                  className={`w-full py-2 rounded text-white font-medium flex items-center justify-center ${
+                    isStartWorkingLoading 
+                      ? 'bg-gray-600 cursor-not-allowed' 
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
                 >
-                  Start Working
+                  {isStartWorkingLoading ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Starting...
+                    </>
+                  ) : (
+                    'Start Working'
+                  )}
                 </button>
                   </>
                 )}

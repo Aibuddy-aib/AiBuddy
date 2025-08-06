@@ -71,11 +71,6 @@ const SkillModal: React.FC<SkillModalProps> = ({
     return selectedSkills.includes(skillId);
   };
 
-  // Check if card is in synthesis panel
-  const isCardInSynthesis = (skillId: string) => {
-    return synthesisCards.includes(skillId);
-  };
-
   // Get available count for synthesis (excluding used and synthesis cards)
   const getAvailableCount = (skillId: string) => {
     if (!userSkills) return 0;
@@ -309,12 +304,13 @@ const SkillModal: React.FC<SkillModalProps> = ({
             <div className="mb-2 p-2 bg-gray-800 rounded-md text-sm text-gray-300 max-h-28 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
               <h3 className="text-center font-bold text-white mb-1">Profession System</h3>
               <p className="mb-1">In Ai Buddy World, Ai Buddy can increase their salary by choosing a profession through skill learning, which is divided into three levels: Common, Rare, and Epic.</p>
-              <p className="mb-1">Learning skills costs Tokens and prices vary.</p>
+              <p className="mb-1">Learning skills costs ETH and prices vary by level.</p>
               <div className="mt-1 space-y-0.5">
-                <p className="text-blue-400">Common salary benefit is 1000% (100 tokens per work)</p>
-                <p className="text-purple-400">Rare salary benefit is 4000% (400 tokens per work)</p>
-                <p className="text-amber-400">Epic salary benefit is 16000% (1600 tokens per work)</p>
-                <p className="text-red-400">After purchasing the tax management NFT, your AI Buddy will gain the right to participate in tax collection, and a 20% tax will be deducted and evenly distributed to the tax officers across the network when players withdraw tokens.</p>
+                <p className="text-blue-400">Common skills: Waiter, Chef, Staff (100 tokens bonus per work completion)</p>
+                <p className="text-purple-400">Rare skills: Firefighter, Singer, Doctor (300 tokens bonus per work completion)</p>
+                <p className="text-amber-400">Epic skills: Astronaut (1000 tokens bonus per work completion)</p>
+                <p className="text-red-400">Hidden skills: Tax Officer (Participate in the distribution of fee pool)</p>
+                <p className="text-gray-400">Multiple skills can be stacked for increased rewards.</p>
               </div>
             </div>
             <div className="space-y-3 my-2 overflow-y-auto flex-grow pr-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">

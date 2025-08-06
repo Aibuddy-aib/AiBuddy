@@ -299,14 +299,7 @@ export const Character = ({
                 />
               </Container>
             </Container>
-          ) : (
-            // other emojis display normally
-            <Text 
-              text={emoji} 
-              anchor={{ x: 0.5, y: 0.5 }}
-              scale={{ x: 0.7, y: 0.7 }}
-            />
-          )}
+          ) : null}
         </Container>
       )}
       

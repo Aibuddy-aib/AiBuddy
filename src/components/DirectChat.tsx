@@ -86,6 +86,7 @@ const DirectChat: React.FC<DirectChatProps> = ({
     currentConversationId ? {
       worldId,
       conversationId: currentConversationId,
+      limit: 50, // limit to get the last 50 messages
     } : 'skip'
   ) || [];
   

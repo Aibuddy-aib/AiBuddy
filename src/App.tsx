@@ -4,11 +4,11 @@ import WorldSelector from './components/WorldSelector.tsx';
 import AdminTools from './components/admin/AdminTools.tsx';
 
 import { ToastContainer } from 'react-toastify';
+import { Toaster } from 'react-hot-toast';
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../convex/_generated/api';
 import { Id } from '../convex/_generated/dataModel';
-// import { useConvex } from 'convex/react';
 
 export default function Home() {
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +93,16 @@ export default function Home() {
           limit={3}
           newestOnTop
           pauseOnFocusLoss={false}
+        />
+        <Toaster 
+          position="top-right"
+          toastOptions={{
+            duration: 3000,
+            style: {
+              background: '#363636',
+              color: '#fff',
+            },
+          }}
         />
       </div>
     </main>

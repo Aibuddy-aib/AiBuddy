@@ -17,7 +17,9 @@ import { toast } from 'react-hot-toast';
 import SolanaWalletConnect from './SolanaWalletConnect';
 import SolanaWalletProvider from './SolanaWalletProvider';
 import { Id } from '../../convex/_generated/dataModel';
-import { requestSignature, type SignatureData, switchToTargetNetwork, isNetworkSupported, getNetworkName } from '../utils/walletSignature';
+import { requestSignature, switchToTargetNetwork, isNetworkSupported } from '../utils/walletSignature';
+import { useSendInput } from '../hooks/sendInput.ts';
+import { DefaultDescription } from '../../data/characters';
 
 export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
 
@@ -77,7 +79,15 @@ const PixiGameWrapper = ({
 function generateSecureRandomName(length: number = 8): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
+  
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(array);
+  } else {
+    // fallback to Math.random()
+    for (let i = 0; i < length; i++) {
+      array[i] = Math.floor(Math.random() * 256);
+    }
+  }
   
   let result = '';
   for (let i = 0; i < length; i++) {
@@ -85,6 +95,16 @@ function generateSecureRandomName(length: number = 8): string {
   }
   return result;
 }
+
+// async function usePlayerHeartbeat(engineId: Id<'engines'>, playerId: Id<'newplayer'>) {
+//   const sendInput = useMutation(api.world.sendWorldInput);
+//   const result = await sendInput({
+//     engineId: engineId,
+//     name: "heartbeat",
+//     args: { playerId }
+//   });
+//   return result;
+// }
 
 interface GameProps {
   selectedWorldId?: Id<'worlds'> | null;
@@ -109,6 +129,7 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
   // Add registration state tracking
   const [isRegistered, setIsRegistered] = useState(false);
   const [player, setPlayer] = useState<any>(null);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
   
   // Add world selection logic
   const [currentWorldId, setCurrentWorldId] = useState<Id<'worlds'> | null>(null);
@@ -125,23 +146,19 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
   const game = useServerGame(worldId);
   
   // Add reference for last registration attempt time
-  const lastRegistrationAttempt = useRef(0);
+  // const lastRegistrationAttempt = useRef(0);
 
   // login
   const loginMutation = useMutation(api.newplayer.loginPlayer);
-
   // register
-  const registerMutation = useMutation(api.newplayer.registerPlayer);
-
+  // const registerMutation = useMutation(api.newplayer.registerPlayer);
   // verify signature
   const verifySignatureMutation = useMutation(api.newplayer.verifyWalletSignature);
+  // use sendInput Hook
+  const sendCreatePlayerAgent = useSendInput(engineId!, 'createPlayerAgent');
+  // create newplayer record mutation
+  const createPlayerRecord = useMutation(api.newplayer.createPlayerRecord);
 
-  // useEffect(() => {
-  //   if (engineId && player?.playerId) {
-  //     usePlayerHeartbeat(engineId, player.playerId);
-  //     console.log("player heartbeat: ", player.playerId);
-  //   }
-  // }, [engineId, player]);
   
   // Listen for worldId changes, assign value on first entry
   useEffect(() => {
@@ -174,7 +191,7 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
 
   useEffect(() => {
     async function checkWalletConnection() {
-      console.log(`[flash] check ethereum ${window.ethereum} and connectedWalletAddress ${localStorage.getItem('connectedWalletAddress')}`);
+      // console.log(`[flash] check ethereum ${window.ethereum} and connectedWalletAddress ${localStorage.getItem('connectedWalletAddress')}`);
       if (window.ethereum && localStorage.getItem('connectedWalletAddress')) {
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
         if (accounts.length > 0 && accounts[0]) {
@@ -201,6 +218,9 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
 
   // Connect Ethereum wallet function with signature authentication
   const connectWallet = async () => {
+    if (isConnectingWallet) return;
+    
+    setIsConnectingWallet(true);
     try {
       // Check if there's MetaMask or other Ethereum provider
       if (window.ethereum) {
@@ -280,6 +300,8 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
     } catch (error) {
       console.error("[wallet] Error connecting to wallet:", error);
       toast.error("Failed to connect wallet. Please try again.");
+    } finally {
+      setIsConnectingWallet(false);
     }
   };
 
@@ -292,22 +314,41 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
     // login, if player not found, register player
     if (!loginResult.success && (loginResult.player === null)) {
       console.log("[wallet] login player failed, register player: ", loginResult);
-      const registerResult = await registerMutation({
-        worldId: worldId!,
-        name: generateSecureRandomName(8),
-        ethAddress: account,
-      });
-      if (registerResult.success) {
-        // Set the world ID for the newly registered player
-        if (registerResult.worldId) {
-          setCurrentWorldId(registerResult.worldId);
-          if (onWorldChange) {
-            onWorldChange(registerResult.worldId);
+      try {
+        const avatarNumber = Math.floor(Math.random() * 7) + 1;
+        // if it's 2 (Kurt), use 8 instead, otherwise keep the original number
+        const character = `f${avatarNumber === 2 ? 8 : avatarNumber}`;
+        const result = await sendCreatePlayerAgent({
+          name: generateSecureRandomName(8),
+          ethAddress: account,
+          character: character,
+          identity: DefaultDescription.identity,
+        });
+
+        console.debug('Player creation result: ', result);
+        const createRecordResult = await createPlayerRecord({
+          playerId: (result as any).playerId,
+          newplayerData: (result as any).data,
+          worldId: worldId!,
+        });
+        
+        console.debug('Create player record result: ', createRecordResult);
+        
+        // if create record success, login again
+        if (createRecordResult.success) {
+          // retry login
+          const retryLoginResult = await loginMutation({
+            worldId: worldId!,
+            ethAddress: account
+          });
+          
+          if (retryLoginResult.success) {
+            return retryLoginResult.player;
           }
         }
-        return registerResult.player;
-      } else {
-        console.log("register player failed", registerResult);
+      } catch (error) {
+        console.error('Error creating player: ', error);
+        toast.error('Failed to create player');
         return;
       }
     }
@@ -412,35 +453,35 @@ export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
   }, [player, connectedWalletAddress, isRegistered]);
 
   // monitor player change, trigger auto register
-  useEffect(() => {
-    let isMounted = true; // Component mount state marker
+  // useEffect(() => {
+  //   let isMounted = true; // Component mount state marker
     
-    const autoRegister = async () => {
-      // Prevent duplicate registration: check if registration was attempted recently (within 1 second)
-      const now = Date.now();
-      if (now - lastRegistrationAttempt.current < 1000) {
-        console.log("[auto register] Ignore duplicate registration requests in short time");
-        return;
-      }
+  //   const autoRegister = async () => {
+  //     // Prevent duplicate registration: check if registration was attempted recently (within 1 second)
+  //     const now = Date.now();
+  //     if (now - lastRegistrationAttempt.current < 1000) {
+  //       console.log("[auto register] Ignore duplicate registration requests in short time");
+  //       return;
+  //     }
       
-      lastRegistrationAttempt.current = now;
-      if (connectedWalletAddress && !isRegistered && pendingAutoRegister.current && isMounted) {
-        console.log("[auto register] Player changed, trigger auto register");
-        pendingAutoRegister.current = false;
-        await registerMutation({
-          worldId: worldId!,
-          name: generateSecureRandomName(8),
-          ethAddress: connectedWalletAddress,
-        });
-      }
-    };
+  //     lastRegistrationAttempt.current = now;
+  //     if (connectedWalletAddress && !isRegistered && pendingAutoRegister.current && isMounted) {
+  //       console.log("[auto register] Player changed, trigger auto register");
+  //       pendingAutoRegister.current = false;
+  //       await registerMutation({
+  //         worldId: worldId!,
+  //         name: generateSecureRandomName(8),
+  //         ethAddress: connectedWalletAddress,
+  //       });
+  //     }
+  //   };
     
-    autoRegister();
+  //   autoRegister();
     
-    return () => {
-      isMounted = false; // Update marker when component unmounts
-    };
-  }, [connectedWalletAddress, isRegistered, registerMutation]);
+  //   return () => {
+  //     isMounted = false; // Update marker when component unmounts
+  //   };
+  // }, [connectedWalletAddress, isRegistered, registerMutation]);
   
   // Custom setSelectedElement handler function, add logs for debugging
   const handleSetSelectedElement = (element?: { kind: 'player'; id: GameId<'players'> }) => {

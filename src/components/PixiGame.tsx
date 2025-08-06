@@ -8,10 +8,7 @@ import { Viewport } from 'pixi-viewport';
 import { Id } from '../../convex/_generated/dataModel';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api.js';
-import { useSendInput } from '../hooks/sendInput.ts';
-import { toastOnError } from '../toasts.ts';
 import { DebugPath } from './DebugPath.tsx';
-import { PositionIndicator } from './PositionIndicator.tsx';
 import { SHOW_DEBUG_UI } from './Game.tsx';
 import { ServerGame } from '../hooks/serverGame.ts';
 import { TokenDisplay } from './TokenDisplay.tsx';
@@ -106,8 +103,6 @@ export const PixiGame = (props: PixiGameProps) => {
   const humanPlayerId = [...props.game.world.players.values()].find(
     (p) => p.human === humanTokenIdentifier,
   )?.id;
-
-  const moveTo = useSendInput(props.engineId, 'moveTo');
   
   // Get AIB token data for the human player
   const playerTokens = useQuery(api.world.getPlayerTokens, { worldId: props.worldId });
@@ -147,43 +142,6 @@ export const PixiGame = (props: PixiGameProps) => {
     dragStart.current = { screenX: e.screenX, screenY: e.screenY };
   };
 
-  const [lastDestination, setLastDestination] = useState<{
-    x: number;
-    y: number;
-    t: number;
-  } | null>(null);
-  const onMapPointerUp = async (e: any) => {
-    if (dragStart.current) {
-      const { screenX, screenY } = dragStart.current;
-      dragStart.current = null;
-      const [dx, dy] = [screenX - e.screenX, screenY - e.screenY];
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 10) {
-        console.log(`Skipping navigation on drag event (${dist}px)`);
-        return;
-      }
-    }
-    if (!humanPlayerId) {
-      return;
-    }
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    const gameSpacePx = viewport.toWorld(e.screenX, e.screenY);
-    const tileDim = props.game.worldMap.tileDim;
-    const gameSpaceTiles = {
-      x: gameSpacePx.x / tileDim,
-      y: gameSpacePx.y / tileDim,
-    };
-    setLastDestination({ t: Date.now(), ...gameSpaceTiles });
-    const roundedTiles = {
-      x: Math.floor(gameSpaceTiles.x),
-      y: Math.floor(gameSpaceTiles.y),
-    };
-    console.log(`Moving to ${JSON.stringify(roundedTiles)}`);
-    await toastOnError(moveTo({ playerId: humanPlayerId, destination: roundedTiles }));
-  };
   const { width, height, tileDim } = props.game.worldMap;
   const players = [...props.game.world.players.values()];
 
@@ -237,7 +195,6 @@ export const PixiGame = (props: PixiGameProps) => {
               <DebugPath key={`path-${p.id}`} player={p} tileDim={tileDim} />
             ),
         )}
-        {lastDestination && <PositionIndicator destination={lastDestination} tileDim={tileDim} />}
         {players.map((p) => (
           <Player
             key={`player-${p.id}`}

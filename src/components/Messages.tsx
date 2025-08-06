@@ -1,15 +1,12 @@
-import clsx from 'clsx';
 import { Doc, Id } from '../../convex/_generated/dataModel';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
-import { MessageInput } from './MessageInput';
 import { Player } from '../../convex/aiTown/player';
 import { Conversation } from '../../convex/aiTown/conversation';
 import { useEffect, useRef } from 'react';
 
 export function Messages({
   worldId,
-  engineId,
   conversation,
   inConversationWithMe,
   humanPlayer,
@@ -29,6 +26,7 @@ export function Messages({
   const messages = useQuery(api.messages.listMessages, {
     worldId,
     conversationId: conversation.doc.id,
+    limit: 50, // limit to get the last 50 messages
   });
   let currentlyTyping = conversation.kind === 'active' ? conversation.doc.isTyping : undefined;
   if (messages !== undefined && currentlyTyping) {

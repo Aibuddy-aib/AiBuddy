@@ -1,5 +1,5 @@
 export const ACTION_TIMEOUT = 10_000; // Increased to 10 seconds, as GPT-4 needs longer response time
-// export const ACTION_TIMEOUT = 60_000;// normally fine
+// export const ACTION_TIMEOUT = 60_000; // normally fine
 
 export const IDLE_WORLD_TIMEOUT = 5 * 60 * 1000;
 export const WORLD_HEARTBEAT_INTERVAL = 60 * 1000;
@@ -11,6 +11,7 @@ export const STEP_INTERVAL = 1000; // Increased to 1000ms (1s), significantly re
 export const PATHFINDING_TIMEOUT = 8_000; // Further reduce pathfinding timeout
 export const PATHFINDING_BACKOFF = 500; // Increased to 500ms, reduce conflict handling frequency
 export const CONVERSATION_DISTANCE = 3;
+export const GENERATE_MESSAGE_OPERATION_TIMEOUT_MS = 10_000;
 export const MIDPOINT_THRESHOLD = 4;
 export const TYPING_TIMEOUT = 15 * 1000;
 export const COLLISION_THRESHOLD = 0.75;

@@ -56,7 +56,7 @@ export const Player = ({
     return null;
   }
 
-  // Find the conversation that the character is participating in
+  // find the conversation the character is participating in
   const conversation = [...game.world.conversations.values()].find(c => {
     return [...c.participants.keys()].includes(player.id) &&
       [...c.participants.values()].some(p => p.status.kind === 'participating');
@@ -65,23 +65,23 @@ export const Player = ({
   const conversationId = conversation?.id;
   const worldId = useQuery(api.world.defaultWorldStatus)?.worldId;
   
-  // Determine if the character is currently speaking
+  // check if the character is speaking
   const isSpeaking = !![...game.world.conversations.values()].find(
     (c) => c.isTyping?.playerId === player.id,
   );
   
-  // Get all messages in the conversation
+  // get all messages in the conversation
   const messages = useQuery(
     api.messages.listMessages,
-    conversationId && worldId ? { worldId, conversationId } : 'skip'
+    conversationId && worldId ? { worldId, conversationId, limit: 50 } : 'skip' // limit to get the last 50 messages for displaying the current message
   );
   
-  // Only get the message that the character is currently saying or the most recent one
+  // only get the current message the character is saying or the most recent message
   let currentMessage = '';
   if (messages?.length) {
-    // If the character is speaking, find what they are typing
+    // if the character is speaking, find the message he is typing
     if (isSpeaking) {
-      // Find the latest message from this character
+      // find the latest message for the character
       const latestMessage = messages
         .filter(m => m.author === player.id)
         .sort((a, b) => b._creationTime - a._creationTime)[0]?.text;
@@ -98,46 +98,32 @@ export const Player = ({
       (a) => a.playerId === player.id && !!a.inProgressOperation && a.inProgressOperation.name !== 'agentDoSomething'
     );
     
-  // Determine whether to show the thinking icon, but don't affect movement
+  // check if the thinking icon should be displayed, but does not affect movement
   const shouldShowThinking = isThinking && (!historicalLocation.speed || historicalLocation.speed === 0);
     
   const tileDim = game.worldMap.tileDim;
   const historicalFacing = { dx: historicalLocation.dx, dy: historicalLocation.dy };
   
-  // Get character name
+  // get the character name
   const playerName = game.playerDescriptions.get(player.id)?.name || playerCharacter;
   
-  // Get character AIB token data - from player object, which is kept up-to-date by AIBTokenService
+  // get the character AIB token data - from player object, player object data is kept up to date by AIBTokenService
   const playerAibtoken = player.aibtoken !== undefined 
     ? player.aibtoken 
     : game.playerDescriptions.get(player.id)?.aibtoken || 0;
   
-  // Determine if this is the current logged-in user's character
+  // check if the character is the current logged-in user
   const isCurrentUser = userAddress && player.ethAddress === userAddress ? true : false;
-  
-  // Add debug log
-  if (isCurrentUser) {
-    console.log('Current user character:', {
-      playerName,
-      playerEthAddress: player.ethAddress,
-      userAddress,
-      isCurrentUser
-    });
-  }
-  
-  const inConversation = !![...game.world.conversations.values()].find(
-    (c) => c.participants.has(player.id) && !['invited'].includes(c.participants.get(player.id)!.status.kind),
-  );
 
-  // Enhanced click handling
+  // enhance click handling
   const handleClick = () => {
-    console.log("Player component: Handling click event, setting selected character:", player.id);
+    console.log("Player component: handle click event, set selected character:", player.id);
     onClick({
       kind: 'player',
       id: player.id,
     });
   };
-
+  
   return (
     <Character
       textureUrl={character.textureUrl}
@@ -165,6 +151,7 @@ export const Player = ({
       isCurrentUser={isCurrentUser}
       ethAddress={player.ethAddress || ''}
       viewportInfo={viewportInfo}
+      isWorking={player.isWorking}
     />
   );
 };

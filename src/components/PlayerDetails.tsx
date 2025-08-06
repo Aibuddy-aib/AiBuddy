@@ -160,7 +160,7 @@ export default function PlayerDetails({
         
         if (remaining <= 0) {
           console.log("work time ended, processing work completion");
-
+          
           // clear timer
           clearInterval(timer);
           workEndTimeRef.current = null; // reset end time
@@ -238,7 +238,8 @@ export default function PlayerDetails({
           
           // check if the work start time exists
           if (player.workStartTime) {
-            workEndTimeRef.current = player.workStartTime + WORK_DURATION;
+            const workDuration = 8 * 60 * 60 * 1000;
+            workEndTimeRef.current = player.workStartTime + workDuration;
             
             // immediately calculate the remaining time
             const remaining = Math.max(0, workEndTimeRef.current - now);
