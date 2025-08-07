@@ -20,11 +20,6 @@ export const playerDoSomething = internalAction({
     const map = new WorldMap(args.map);
 
     try {
-      // simple delay, avoid all agents acting at the same time
-      // const totalDelay = 500 + Math.random() * 1000;
-      // console.log(`PlayerAgent ${playerAgent.id} waiting ${totalDelay.toFixed(0)}ms before action...`);
-      // await sleep(totalDelay);
-
       // reduce activity probability to 50%, increase the chance of random movement
       if (Math.random() < 0.5) {
         // select random activity

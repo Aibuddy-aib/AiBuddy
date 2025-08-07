@@ -20,7 +20,7 @@ interface VerificationResult {
   error?: string;
 }
 
-// 验证所有待处理交易
+// verify transaction
 export const verifyAllPendingTransactions = action({
   handler: async (ctx): Promise<{
     success: boolean;
@@ -29,12 +29,12 @@ export const verifyAllPendingTransactions = action({
     error?: string;
   }> => {
     try {
-      // 获取所有待处理交易
+      // get all pending payments
       const pendingPayments = await ctx.runQuery(api.payment.getPendingPayments, {}) as PaymentRecord[];
       
-      console.log(`发现 ${pendingPayments.length} 个待处理交易`);
+      console.log(`Find ${pendingPayments.length} pending transactions found`);
       
-      // 如果没有待处理交易，直接返回
+      // If there is no pending transaction, return directly
       if (pendingPayments.length === 0) {
         return { success: true, processedCount: 0 };
       }
@@ -42,7 +42,6 @@ export const verifyAllPendingTransactions = action({
       const results: VerificationResult[] = [];
       for (const payment of pendingPayments) {
         try {
-          // 验证交易
           const verificationResult: any = await ctx.runAction(api.blockchain.verifyTransaction, {
             txHash: payment.txHash,
             expectedAmount: payment.amount,
@@ -50,13 +49,13 @@ export const verifyAllPendingTransactions = action({
             paymentId: payment._id
           });
           
-          // 更新支付状态
+          // Update payment status
           await ctx.runMutation(api.payment.updatePaymentStatus, {
             paymentId: payment._id,
             status: verificationResult.status
           });
           
-          console.log(`交易验证结果: ${JSON.stringify(verificationResult)}`);
+          console.log(`Transaction verification results: ${JSON.stringify(verificationResult)}`);
           
           results.push({
             success: true,
@@ -65,22 +64,22 @@ export const verifyAllPendingTransactions = action({
             paymentId: payment._id,
           });
           
-          // 添加短暂延迟，避免API速率限制
+          // Add a short delay to avoid API rate limiting
           await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (error: any) {
-          console.error(`验证交易失败: ${payment._id}`, error);
+          console.error(`Verification transaction failed: ${payment._id}`, error);
           results.push({ success: false, error: String(error) });
         }
       }
       
-      console.log(`批量验证完成，结果: ${JSON.stringify(results)}`);
+      console.log(`Batch verification completed: ${JSON.stringify(results)}`);
       return {
         success: true,
         processedCount: results.length,
         results
       };
     } catch (error: any) {
-      console.error("验证交易任务执行失败:", error);
+      console.error("Verification transaction task execution failed:", error);
       return { success: false, processedCount: 0, error: String(error) };
     }
   }

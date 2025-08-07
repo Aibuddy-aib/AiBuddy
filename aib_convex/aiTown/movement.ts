@@ -1,6 +1,6 @@
 import { movementSpeed } from '../../data/characters';
 import { COLLISION_THRESHOLD } from '../constants';
-import { compressPath, distance, manhattanDistance, pointsEqual } from '../util/geometry';
+import { compressPath, distance, pointsEqual } from '../util/geometry';
 import { MinHeap } from '../util/minheap';
 import { Point, Vector, Path } from '../util/types';
 import { Game } from '../aiTown/game';

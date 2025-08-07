@@ -1,11 +1,9 @@
 import { cronJobs } from 'convex/server';
-import { DELETE_BATCH_SIZE, IDLE_WORLD_TIMEOUT, VACUUM_MAX_AGE } from './constants';
+import { DELETE_BATCH_SIZE, VACUUM_MAX_AGE } from './constants';
 import { internal } from './_generated/api';
-import { internalMutation, mutation } from './_generated/server';
+import { internalMutation } from './_generated/server';
 import { TableNames } from './_generated/dataModel';
 import { v } from 'convex/values';
-import { internalAction } from "./_generated/server";
-import { api } from "./_generated/api";
 
 
 const crons = cronJobs();

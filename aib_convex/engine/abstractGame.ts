@@ -34,7 +34,7 @@ export abstract class AbstractGame {
     const completedInputs = [];
 
     this.beginStep(currentTs);
-    const inputsCount = inputs.length;
+    const inputsCount = .length;
     let loopCount = 0;
 
     while (numTicks < this.maxTicksPerStep) {
@@ -84,7 +84,6 @@ export abstract class AbstractGame {
     // save the step of the world
     await this.saveStep(ctx, engineUpdate);
 
-    // console.debug(`input number: ${inputsCount}, loop count: ${loopCount}`);
     console.debug(`Simulated from ${startTs} to ${currentTs} (${currentTs - startTs}ms)`);
   }
 }

@@ -5,11 +5,12 @@ import { rememberConversation } from '../agent/memory';
 import { GameId, agentId, conversationId, playerId } from './ids';
 import {
   continueConversationMessage,
+  leaveConversationMessage,
   startConversationMessage,
 } from '../agent/conversation';
 import { assertNever } from '../util/assertNever';
 import { serializedAgent } from './agent';
-import { ACTIVITIES } from '../constants';
+import { ACTIVITIES, GENERATE_MESSAGE_OPERATION_TIMEOUT_MS } from '../constants';
 import { api, internal } from '../_generated/api';
 import { sleep } from '../util/sleep';
 import { serializedPlayer } from './player';
@@ -42,6 +43,7 @@ export const agentRememberConversation = internalAction({
     });
   },
 });
+
 export const agentGenerateMessage = internalAction({
   args: {
     worldId: v.id('worlds'),
@@ -54,14 +56,12 @@ export const agentGenerateMessage = internalAction({
     messageUuid: v.string(),
   },
   handler: async (ctx, args) => {
-    const OPERATION_TIMEOUT_MS = 10000; // 10 seconds timeout for the entire operation
-    
     try {
       // Create a timeout promise for the entire operation
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
           reject(new Error('Operation timeout'));
-        }, OPERATION_TIMEOUT_MS);
+        }, GENERATE_MESSAGE_OPERATION_TIMEOUT_MS);
       });
       
       // Race between the actual operation and timeout
@@ -76,9 +76,9 @@ export const agentGenerateMessage = internalAction({
               completionFn = continueConversationMessage;
               break;
             case 'leave':
-              // completionFn = leaveConversationMessage;
-              return "exited";
-              // break;
+              completionFn = leaveConversationMessage;
+              // return "exited";
+              break;
             default:
               assertNever(args.type);
           }
@@ -90,6 +90,18 @@ export const agentGenerateMessage = internalAction({
             args.playerId as GameId<'players'>,
             args.otherPlayerId as GameId<'players'>,
           );
+
+          await ctx.runMutation(internal.aiTown.agent.agentSendMessage, {
+            worldId: args.worldId,
+            conversationId: args.conversationId,
+            agentId: args.agentId,
+            playerId: args.playerId,
+            text,
+            messageUuid: args.messageUuid,
+            leaveConversation: args.type === 'leave',
+            operationId: args.operationId,
+          });
+          
           return text;
         })(),
         timeoutPromise
@@ -101,8 +113,6 @@ export const agentGenerateMessage = internalAction({
       
       // If operation times out, force exit conversation
       if (error.message === 'Operation timeout') {
-        console.log(`agentGenerateMessage operation timed out after ${OPERATION_TIMEOUT_MS}ms, forcing exit`);
-        
         // directly call force exit, bypass the message sending process
         await ctx.runMutation(internal.aiTown.agent.forceExitConversation, {
           worldId: args.worldId,

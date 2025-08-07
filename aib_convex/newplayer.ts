@@ -802,7 +802,7 @@ export const startWork = mutation({
   }
 });
 
-// 递归调度奖励分发，避免一次性调度太多函数
+// Recursively schedule reward distribution to avoid scheduling too many functions at once
 export const scheduleWorkRewards = internalMutation({
   args: {
     playerId: v.string(),
@@ -816,7 +816,7 @@ export const scheduleWorkRewards = internalMutation({
   handler: async (ctx, args) => {
     const now = Date.now();
     
-    // 分发当前间隔的奖励
+    // Distribute rewards for the current interval
     await ctx.scheduler.runAfter(0, internal.newplayer.distributeWorkReward, {
       playerId: args.playerId,
       worldId: args.worldId,
@@ -825,7 +825,7 @@ export const scheduleWorkRewards = internalMutation({
       workRecordId: args.workRecordId
     });
     
-    // 如果还有更多间隔，递归调度下一个
+    // If there are more intervals, recursively schedule the next one
     if (args.currentInterval < args.maxIntervals) {
       ctx.scheduler.runAfter(args.rewardInterval, internal.newplayer.scheduleWorkRewards, {
         playerId: args.playerId,
