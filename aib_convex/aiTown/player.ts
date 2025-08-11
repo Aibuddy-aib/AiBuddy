@@ -166,6 +166,13 @@ export class Player {
   }
 
   tick(game: Game, now: number) {
+    // if (this.human && this.lastInput < now - HUMAN_IDLE_TOO_LONG) {
+    //   this.leave(game, now);
+    // }
+    // const player = game.world.players.get(this.id);
+    // if (!player) {
+    //   throw new Error(`Invalid player ID ${this.id}`);
+    // }
     if (this.inProgressOperation) {
       if (now < this.inProgressOperation.started + ACTION_TIMEOUT) {
         // Wait on the operation to finish.
@@ -604,6 +611,12 @@ export async function runPlayerOperation(ctx: MutationCtx, operation: string, ar
       // await ctx.runMutation(internal.aiTown.playerOperations.sendMessageToAgent, args);
       reference = internal.aiTown.playerOperations.sendMessageToAgent;
       break;
+    case 'scheduleWorkRewards':
+      reference = internal.aiTown.playerOperations.scheduleWorkRewards;
+      break;
+    case 'completeWork':
+      reference = internal.aiTown.playerOperations.completeWork;
+      break;
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -614,4 +627,6 @@ interface PlayerOperations {
   playerTriggerEvent: any;
   sendMessageToAgent: any;
   playerDoSomething: any;
+  scheduleWorkRewards: any;
+  completeWork: any;
 }

@@ -8,6 +8,7 @@ import { RANDOM_EVENT_COUNT, RANDOM_EVENTS, RANDOM_EVENT_INTERVAL } from "../con
 import { Conversation } from "./conversation";
 import { PlayerAgent } from "./playerAgent";
 import { characters } from '../../data/characters';
+import { WORK_DURATION, WORK_REWARD_INTERVAL } from "../constants";
 
 export const playerInputs = {
   join: inputHandler({
@@ -52,22 +53,14 @@ export const playerInputs = {
   startWorking: inputHandler({
     args: { 
       playerId: v.string(),
-      workStartTime: v.optional(v.number()) // Add optional work start time parameter
+      workStartTime: v.number(), // Add work start time parameter
+      workRecordId: v.optional(v.id('workCompleteRecords'))
     },
     handler: (game, now, args) => {
       const playerId = parseGameId('players', args.playerId);
       const player = game.world.players.get(playerId);
       if (!player) throw new Error(`Invalid player ID ${playerId}`);
-      
-      // Check if player is in conversation (but allow working while moving)
-      const conversation = [...game.world.conversations.values()].find((c) =>
-        c.participants.has(player.id)
-      );
-      
-      if (conversation) {
-        return { success: false, reason: "Cannot start working while in a conversation" };
-      }
-      
+
       // If custom work start time is provided, use it
       if (args.workStartTime !== undefined) {
         player.workStartTime = args.workStartTime;
@@ -76,6 +69,9 @@ export const playerInputs = {
       
       // Start work status
       const success = player.startWorking();
+      if (!success) {
+        throw new Error(`Player ${player.name} start working failed`);
+      }
       
       // Set work activity, using saved start time or current time
       player.activity = {
@@ -90,6 +86,22 @@ export const playerInputs = {
         playerDesc.isWorking = true;
         playerDesc.workStartTime = player.workStartTime;
         game.descriptionsModified = true;
+
+        if (args.workRecordId) {
+          // schedule work reward distribution
+          const totalIntervals = Math.floor(WORK_DURATION / WORK_REWARD_INTERVAL);
+          game.scheduleOperation('scheduleWorkRewards', 'player', {
+            playerId: player.id,
+            worldId: game.worldId,
+            workStartTime: now,
+            workRecordId: args.workRecordId,
+            currentInterval: 1,
+            maxIntervals: totalIntervals,
+            rewardInterval: WORK_REWARD_INTERVAL
+          });
+          
+          console.log(`Scheduled ${totalIntervals} reward distributions for player ${player.name}, completeWork will be triggered after final reward`)
+        }
       }
 
       return { success };
@@ -271,7 +283,7 @@ export const playerInputs = {
       
       // Event tokens are controlled by game engine, can sync
       player.syncTokenToDatabase(game);
-      
+     
       // add event to pendingOperations
       game.pendingOperations.push({
         name: 'insertEvent',
@@ -282,9 +294,9 @@ export const playerInputs = {
           event: playerEvent,
         }
       });
-      
+
       console.log(`Player ${player.name || playerId} triggered random event: ${playerEvent.title}, token change: ${tokenChange}`);
-      
+
       return { 
         success: true, 
         event: playerEvent,
@@ -390,18 +402,26 @@ export const playerInputs = {
       conversationId: v.string(),
     },
     handler: (game, now, args) => {
+      // delete conversation
+      const conversationId = parseGameId('conversations', args.conversationId);
+      const deleted = game.world.conversations.delete(conversationId);
+      
+      // clean up agent state
       const agent = game.world.agents.get(parseGameId('agents', args.agentId));
       if (agent) {
-        agent.startOperation(game, now, 'agentGenerateMessage', 'agent', {
-          worldId: args.worldId,
-          playerId: agent.playerId,
-          agentId: args.agentId,
-          conversationId: args.conversationId,
-          otherPlayerId: args.playerId,
-          messageUuid: crypto.randomUUID(),
-          type: 'leave',
-        });
+        // clean up agent conversation state
+        agent.inProgressOperation = undefined;
+        agent.lastConversation = undefined;
+        agent.toRemember = undefined;
       }
+      
+      // clean up player agent state
+      const playerAgent = game.world.playerAgents.get(parseGameId('players', args.playerId));
+      if (playerAgent) {
+        playerAgent.inProgressOperation = undefined;
+      }
+      
+      console.log(`[leaveDirectChat] Directly deleted conversation ${args.conversationId}, deleted: ${deleted}`);
       return { success: true };
     },
   }),

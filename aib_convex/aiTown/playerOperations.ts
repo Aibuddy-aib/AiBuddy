@@ -1,5 +1,6 @@
 import { v } from 'convex/values';
 import { internalMutation, query } from '../_generated/server';
+import { internal } from '../_generated/api';
 import { insertInput } from '../aiTown/insertInput';
 
 // Query player events
@@ -124,6 +125,47 @@ export const sendMessageToAgent = internalMutation({
       conversationId: args.conversationId,
       playerId: args.playerId,
       timestamp: Date.now(),
+    });
+  },
+});
+
+export const scheduleWorkRewards = internalMutation({
+  args: {
+    playerId: v.string(),
+    worldId: v.id('worlds'),
+    workStartTime: v.number(),
+    workRecordId: v.id('workCompleteRecords'),
+    currentInterval: v.number(),
+    maxIntervals: v.number(),
+    rewardInterval: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Call the existing scheduleWorkRewards function from newplayer.ts
+    await ctx.scheduler.runAfter(0, internal.newplayer.scheduleWorkRewards, {
+      playerId: args.playerId,
+      worldId: args.worldId,
+      workStartTime: args.workStartTime,
+      workRecordId: args.workRecordId,
+      currentInterval: args.currentInterval,
+      maxIntervals: args.maxIntervals,
+      rewardInterval: args.rewardInterval
+    });
+  },
+});
+
+export const completeWork = internalMutation({
+  args: {
+    playerId: v.string(),
+    worldId: v.id('worlds'),
+    workRecordId: v.optional(v.id('workCompleteRecords')),
+  },
+  handler: async (ctx, args) => {
+    // Call the existing completeWork function from newplayer.ts immediately
+    // This will only be called after all scheduleWorkRewards have completed
+    await ctx.scheduler.runAfter(0, internal.newplayer.completeWork, {
+      playerId: args.playerId,
+      worldId: args.worldId,
+      workRecordId: args.workRecordId
     });
   },
 });
