@@ -28,10 +28,7 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
   const [showTenDrawResult, setShowTenDrawResult] = useState(false);
   
   // Animation states
-  const [isShaking, setIsShaking] = useState(false);
-  const [isOpening, setIsOpening] = useState(false);
-  const [showOpeningText, setShowOpeningText] = useState(false);
-  const [isCardRevealing, setIsCardRevealing] = useState(false);
+  const [animationState, setAnimationState] = useState<'idle' | 'shaking' | 'opening' | 'revealing'>('idle');
   const [currentImage, setCurrentImage] = useState('/assets/blindbox/blindbox.png');
   const [tenDrawCardsVisible, setTenDrawCardsVisible] = useState<boolean[]>([]);
 
@@ -39,23 +36,22 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
   const drawCardTransactionMutation = useMutation(api.newplayer.drawCardTransaction);
 
   const startShakeAnimation = () => {
-    setIsShaking(true);
+    setAnimationState('shaking');
     setCurrentImage('/assets/blindbox/blindbox-only.png');
     
     // Shake animation lasts 2 seconds
     setTimeout(() => {
-      setIsShaking(false);
-      setShowOpeningText(true);
+      setAnimationState('opening');
       
       // Show "Opening..." for 1 second
       setTimeout(() => {
-        setShowOpeningText(false);
-        setIsOpening(true);
+        setAnimationState('revealing');
       }, 1000);
     }, 2000);
   };
 
-  const handleSingleDraw = async () => {
+  // Refactored draw logic to eliminate duplicate code
+  const handleDraw = async (drawType: 'single' | 'ten') => {
     if (isAnimating || !playerId) return;
     
     setIsAnimating(true);
@@ -64,71 +60,7 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
     try {
       const result = await drawCardTransactionMutation({
         playerId: playerId,
-        drawType: 'single',
-        ethAddress: ethAddress!,
-        worldId: worldId!
-      });
-      
-      if (result.success && result.drawnCards && result.drawnCards.length > 0) {
-        const drawnCard = result.drawnCards[0];
-        // Convert server return card data to frontend format
-        const frontendCard: Card = {
-          id: drawnCard.id,
-          name: drawnCard.name,
-          level: drawnCard.level,
-          image: `/assets/blindbox/${drawnCard.id}_card.png`
-        };
-        
-        // Wait for opening animation to complete before showing result
-        setTimeout(() => {
-          setSelectedCard(frontendCard);
-          setIsCardRevealing(true);
-          
-          // Show result after card scale-up animation completes
-          setTimeout(() => {
-            setShowResult(true);
-            setIsCardRevealing(false);
-            setIsOpening(false);
-            setCurrentImage('/assets/blindbox/blindbox.png');
-          }, 500);
-        }, 1000);
-        
-        const levelNames = ['', 'Common', 'Rare', 'Epic', 'Hidden'];
-        if (frontendCard.level === 4) {
-          toast.success(`🎉 LEGENDARY! You got the ultra-rare ${frontendCard.name}!`, {
-            duration: 5000,
-            style: {
-              background: 'linear-gradient(90deg, #ef4444, #dc2626, #b91c1c)',
-              color: 'white',
-              fontWeight: 'bold',
-            },
-          });
-        } else {
-          toast.success(`Congratulations! You got a ${levelNames[frontendCard.level]} ${frontendCard.name}!`);
-        }
-      } else {
-        toast.error('Draw failed. Please try again.');
-        setIsAnimating(false);
-        setCurrentImage('/assets/blindbox/blindbox.png');
-      }
-    } catch (error) {
-      console.error('Single draw failed:', error);
-      toast.error('Draw failed. Please try again.');
-      setIsAnimating(false);
-      setCurrentImage('/assets/blindbox/blindbox.png');
-    }
-  };
-
-  const handleTenDraw = async () => {
-    if (isAnimating || !playerId) return;
-    
-    setIsAnimating(true);
-    startShakeAnimation();
-    
-    try {
-      const result = await drawCardTransactionMutation({
-        playerId: playerId,
-        drawType: 'ten',
+        drawType: drawType,
         ethAddress: ethAddress!,
         worldId: worldId!
       });
@@ -142,78 +74,111 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
           image: `/assets/blindbox/${drawnCard.id}_card.png`
         }));
         
-        // Wait for opening animation to complete before showing result
-        setTimeout(() => {
-          setSelectedCards(frontendCards);
-          setShowTenDrawResult(true);
-          setIsOpening(false);
-          setCurrentImage('/assets/blindbox/blindbox.png');
+        if (drawType === 'single') {
+          const frontendCard = frontendCards[0];
           
-          // Show cards one by one for smooth presentation effect
-          const cardVisibility = new Array(frontendCards.length).fill(false);
-          setTenDrawCardsVisible(cardVisibility);
-          
-          // Show one card every 300ms so users can clearly see each card appear
-          frontendCards.forEach((_, index) => {
+          // Wait for opening animation to complete before showing result
+          setTimeout(() => {
+            setSelectedCard(frontendCard);
+            
+            // Show result after card scale-up animation completes
             setTimeout(() => {
-              setTenDrawCardsVisible(prev => {
-                const newVisibility = [...prev];
-                newVisibility[index] = true;
-                return newVisibility;
-              });
-            }, index * 300);
-          });
-        }, 1000);
-        
-        const rareCount = frontendCards.filter(card => card.level >= 2).length;
-        const legendaryCount = frontendCards.filter(card => card.level === 4).length;
-        
-        if (legendaryCount > 0) {
-          toast.success(`🎉 AMAZING! Ten draw completed with ${legendaryCount} LEGENDARY card${legendaryCount > 1 ? 's' : ''}!`, {
-            duration: 6000,
-            style: {
-              background: 'linear-gradient(90deg, #ef4444, #dc2626, #b91c1c)',
-              color: 'white',
-              fontWeight: 'bold',
-            },
-          });
+              setShowResult(true);
+              setAnimationState('idle');
+              setCurrentImage('/assets/blindbox/blindbox.png');
+            }, 500);
+          }, 1000);
+          
+          const levelNames = ['', 'Common', 'Rare', 'Epic', 'Hidden'];
+          if (frontendCard.level === 4) {
+            toast.success(`🎉 LEGENDARY! You got the ultra-rare ${frontendCard.name}!`, {
+              duration: 5000,
+              style: {
+                background: 'linear-gradient(90deg, #ef4444, #dc2626, #b91c1c)',
+                color: 'white',
+                fontWeight: 'bold',
+              },
+            });
+          } else {
+            toast.success(`Congratulations! You got a ${levelNames[frontendCard.level]} ${frontendCard.name}!`);
+          }
         } else {
-          toast.success(`Ten draw completed! Got ${rareCount} rare+ cards!`);
+          // Ten draw logic
+          // Wait for opening animation to complete before showing result
+          setTimeout(() => {
+            setSelectedCards(frontendCards);
+            setShowTenDrawResult(true);
+            setAnimationState('idle');
+            setCurrentImage('/assets/blindbox/blindbox.png');
+            
+            // Show cards one by one for smooth presentation effect
+            const cardVisibility = new Array(frontendCards.length).fill(false);
+            setTenDrawCardsVisible(cardVisibility);
+            
+            // Show one card every 300ms so users can clearly see each card appear
+            frontendCards.forEach((_, index) => {
+              setTimeout(() => {
+                setTenDrawCardsVisible(prev => {
+                  const newVisibility = [...prev];
+                  newVisibility[index] = true;
+                  return newVisibility;
+                });
+              }, index * 300);
+            });
+          }, 1000);
+          
+          const rareCount = frontendCards.filter(card => card.level >= 2).length;
+          const legendaryCount = frontendCards.filter(card => card.level === 4).length;
+          
+          if (legendaryCount > 0) {
+            toast.success(`🎉 AMAZING! Ten draw completed with ${legendaryCount} LEGENDARY card${legendaryCount > 1 ? 's' : ''}!`, {
+              duration: 6000,
+              style: {
+                background: 'linear-gradient(90deg, #ef4444, #dc2626, #b91c1c)',
+                color: 'white',
+                fontWeight: 'bold',
+              },
+            });
+          } else {
+            toast.success(`Ten draw completed! Got ${rareCount} rare+ cards!`);
+          }
         }
       } else {
-        toast.error('Ten draw failed. Please try again.');
-        setIsAnimating(false);
-        setCurrentImage('/assets/blindbox/blindbox.png');
+        toast.error(`${drawType === 'single' ? 'Draw' : 'Ten draw'} failed. Please try again.`);
+        resetAnimationStates();
       }
     } catch (error) {
-      console.error('Ten draw failed:', error);
-      toast.error('Ten draw failed. Please try again.');
-      setIsAnimating(false);
-      setCurrentImage('/assets/blindbox/blindbox.png');
+      console.error(`${drawType} draw failed:`, error);
+      toast.error(`${drawType === 'single' ? 'Draw' : 'Ten draw'} failed. Please try again.`);
+      resetAnimationStates();
     }
+  };
+
+  const handleSingleDraw = () => {
+    handleDraw('single');
+  };
+
+  const handleTenDraw = () => {
+    handleDraw('ten');
+  };
+
+  const resetAnimationStates = () => {
+    setIsAnimating(false);
+    setAnimationState('idle');
+    setCurrentImage('/assets/blindbox/blindbox.png');
   };
 
   const handleResultConfirm = () => {
     setShowResult(false);
     setSelectedCard(null);
-    setIsAnimating(false);
-    setIsShaking(false);
-    setIsOpening(false);
-    setShowOpeningText(false);
-    setIsCardRevealing(false);
-    setCurrentImage('/assets/blindbox/blindbox.png');
+    resetAnimationStates();
   };
 
   const handleTenDrawResultConfirm = () => {
     setShowTenDrawResult(false);
     setSelectedCards([]);
     setTenDrawCardsVisible([]);
-    setIsAnimating(false);
-    setIsShaking(false);
-    setIsOpening(false);
-    setShowOpeningText(false);
-    setIsCardRevealing(false);
-    setCurrentImage('/assets/blindbox/blindbox.png');
+    resetAnimationStates();
   };
 
   const handleClose = () => {
@@ -229,10 +194,7 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
       setTenDrawCardsVisible([]);
       setIsAnimating(false);
       setShowTenDrawResult(false);
-      setIsShaking(false);
-      setIsOpening(false);
-      setShowOpeningText(false);
-      setIsCardRevealing(false);
+      setAnimationState('idle');
       setCurrentImage('/assets/blindbox/blindbox.png');
     }
   }, [isOpen]);
@@ -262,7 +224,7 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
               onClick={handleSingleDraw}
             >
               {/* Opening text */}
-              {showOpeningText && (
+              {animationState === 'opening' && (
                 <div className="absolute inset-0 flex items-center justify-center z-20">
                   <div className="bg-black bg-opacity-80 text-white px-4 py-2 rounded-lg font-bold text-lg animate-pulse">
                     Opening...
@@ -272,7 +234,7 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
               
               
               {/* Card reveal animation */}
-              {isCardRevealing && selectedCard && (
+              {animationState === 'revealing' && selectedCard && (
                 <div className="absolute inset-0 flex items-center justify-center z-30">
                   <img 
                     src={selectedCard.image} 
@@ -286,8 +248,8 @@ const BlindBox: React.FC<BlindBoxProps> = ({ isOpen, onClose, playerId, ethAddre
                 src={currentImage} 
                 alt="Blind Box" 
                 className={`w-64 h-64 object-contain transition-all duration-300 ${
-                  isShaking ? 'animate-shake' : ''
-                } ${isOpening ? 'opacity-100' : isCardRevealing ? 'opacity-0' : 'opacity-100'}`}
+                  animationState === 'shaking' ? 'animate-shake' : ''
+                } ${animationState === 'opening' ? 'opacity-100' : animationState === 'revealing' ? 'opacity-0' : 'opacity-100'}`}
               />
             </div>
             
