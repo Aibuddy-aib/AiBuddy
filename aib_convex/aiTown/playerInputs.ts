@@ -9,6 +9,27 @@ import { Conversation } from "./conversation";
 import { PlayerAgent } from "./playerAgent";
 import { characters } from '../../data/characters';
 import { WORK_DURATION, WORK_REWARD_INTERVAL } from "../constants";
+import { Game } from "./game";
+import { GameId } from "./ids";
+
+// Helper function to get player with error handling
+function getPlayer(game: Game, playerIdStr: string) {
+  const playerId = parseGameId('players', playerIdStr);
+  const player = game.world.players.get(playerId);
+  if (!player) {
+    throw new Error(`Invalid player ID ${playerId}`);
+  }
+  return { playerId, player };
+}
+
+// Helper function to get player description with error handling
+function getPlayerDescription(game: Game, playerId: GameId<'players'>) {
+  const playerDesc = game.playerDescriptions.get(playerId);
+  if (!playerDesc) {
+    throw new Error(`Player description not found for player ID ${playerId}`);
+  }
+  return playerDesc;
+}
 
 export const playerInputs = {
   join: inputHandler({
@@ -26,9 +47,7 @@ export const playerInputs = {
   leave: inputHandler({
     args: { playerId: v.string() },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       player.leave(game, now);
       return null;
     },
@@ -39,9 +58,7 @@ export const playerInputs = {
       destination: v.union(point, v.null()),
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       if (args.destination) {
         movePlayer(game, now, player, args.destination);
       } else {
@@ -53,13 +70,11 @@ export const playerInputs = {
   startWorking: inputHandler({
     args: { 
       playerId: v.string(),
-      workStartTime: v.number(), // Add work start time parameter
+      workStartTime: v.number(),
       workRecordId: v.optional(v.id('workCompleteRecords'))
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
 
       // If custom work start time is provided, use it
       if (args.workStartTime !== undefined) {
@@ -81,8 +96,8 @@ export const playerInputs = {
       };
       
       // Also update isWorking status and workStartTime in PlayerDescription
-      const playerDesc = game.playerDescriptions.get(player.id);
-      if (playerDesc) {
+      try {
+        const playerDesc = getPlayerDescription(game, player.id);
         playerDesc.isWorking = true;
         playerDesc.workStartTime = player.workStartTime;
         game.descriptionsModified = true;
@@ -102,6 +117,8 @@ export const playerInputs = {
           
           console.log(`Scheduled ${totalIntervals} reward distributions for player ${player.name}, completeWork will be triggered after final reward`)
         }
+      } catch (error) {
+        console.error("Error updating player description:", error);
       }
 
       return { success };
@@ -110,27 +127,24 @@ export const playerInputs = {
   stopWorking: inputHandler({
     args: { playerId: v.string() },
     handler: (game, _, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       
       const success = player.stopWorking();
       
       // Also update isWorking status and workStartTime in PlayerDescription
-      const playerDesc = game.playerDescriptions.get(player.id);
-      if (playerDesc) {
+      try {
+        const playerDesc = getPlayerDescription(game, player.id);
         playerDesc.isWorking = false;
         playerDesc.workStartTime = undefined;
         game.descriptionsModified = true;
+      } catch (error) {
+        console.error("Error updating player description:", error);
       }
       
       // Clear the working activity
       if (player.activity?.description === "Working") {
         player.activity = undefined;
       }
-      
-      // Sync token data to database
-      // player.syncTokenToDatabase(game);
       
       return { success };
     },
@@ -142,9 +156,7 @@ export const playerInputs = {
       message: v.string()
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       
       // Create an activity that lasts 10 seconds with yellow background
       player.activity = {
@@ -182,9 +194,7 @@ export const playerInputs = {
       ethAddress: v.optional(v.string()),
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       
       // Update player basic information
       if (args.name !== undefined) {
@@ -195,8 +205,8 @@ export const playerInputs = {
       }
       
       // Update player description information - use passed playerId instead of player.id
-      const playerDesc = game.playerDescriptions.get(playerId);
-      if (playerDesc) {
+      try {
+        const playerDesc = getPlayerDescription(game, playerId);
         if (args.name !== undefined) {
           playerDesc.name = args.name;
         }
@@ -207,6 +217,8 @@ export const playerInputs = {
           playerDesc.description = args.description;
         }
         game.descriptionsModified = true;
+      } catch (error) {
+        console.error("Error updating player description:", error);
       }
       
       // Mark for database sync - use passed playerId
@@ -224,8 +236,8 @@ export const playerInputs = {
         updatedPlayer: {
           id: playerId,
           name: player.name,
-          character: playerDesc?.character,
-          description: playerDesc?.description,
+          character: game.playerDescriptions.get(playerId)?.character,
+          description: game.playerDescriptions.get(playerId)?.description,
           ethAddress: player.ethAddress
         }
       };
@@ -236,9 +248,7 @@ export const playerInputs = {
       playerId: v.string(),
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       
       // check event interval
       const eventInterval = now - (player.lastEventTime || 0);
@@ -311,9 +321,7 @@ export const playerInputs = {
       aibtoken: v.number(),
     },
     handler: (game, now, args) => {
-      const playerId = parseGameId('players', args.playerId);
-      const player = game.world.players.get(playerId);
-      if (!player) throw new Error(`Invalid player ID ${playerId}`);
+      const { playerId, player } = getPlayer(game, args.playerId);
       
       player.aibtoken = args.aibtoken;
       player.syncTokenToDatabase(game);
@@ -331,17 +339,15 @@ export const playerInputs = {
       conversationId: v.string(),
       text: v.string(),
       messageUuid: v.string(),
-      isDirectChat: v.optional(v.boolean()), // add this parameter to bypass distance check
+      isDirectChat: v.optional(v.boolean()),
     },
     handler: (game, now, args) => {
-      const player = game.world.players.get(parseGameId('players', args.playerId));
-      if (!player) {
-        return { success: false, error: 'Player not found' };
-      }
+      const { player } = getPlayer(game, args.playerId);
       
       let conversationId = args.conversationId;
       if (!conversationId || conversationId === '') {
-        const agent = game.world.agents.get(parseGameId('agents', args.agentId));
+        const agentId = parseGameId('agents', args.agentId);
+        const agent = game.world.agents.get(agentId);
         if (!agent) {
           return { success: false, error: 'Agent not found' };
         }
@@ -407,7 +413,8 @@ export const playerInputs = {
       const deleted = game.world.conversations.delete(conversationId);
       
       // clean up agent state
-      const agent = game.world.agents.get(parseGameId('agents', args.agentId));
+      const agentId = parseGameId('agents', args.agentId);
+      const agent = game.world.agents.get(agentId);
       if (agent) {
         // clean up agent conversation state
         agent.inProgressOperation = undefined;
@@ -416,9 +423,15 @@ export const playerInputs = {
       }
       
       // clean up player agent state
-      const playerAgent = game.world.playerAgents.get(parseGameId('players', args.playerId));
-      if (playerAgent) {
-        playerAgent.inProgressOperation = undefined;
+      try {
+        const playerAgentId = parseGameId('players', args.playerId);
+        const playerAgent = game.world.playerAgents.get(playerAgentId);
+        if (playerAgent) {
+          playerAgent.inProgressOperation = undefined;
+        }
+      } catch (error) {
+        // Player agent might not exist, which is fine
+        console.debug("Player agent not found:", error);
       }
       
       console.log(`[leaveDirectChat] Directly deleted conversation ${args.conversationId}, deleted: ${deleted}`);
@@ -434,7 +447,6 @@ export const playerInputs = {
     },
     handler: (game, now, args) => {
       const { character, name: customName, identity, ethAddress } = args;
-      // const desc = Descriptions[descriptionIndex];
       const char = characters.find(c => c.name === character);
       if (!char) throw new Error(`Character ${character} not found`);
 
@@ -446,19 +458,22 @@ export const playerInputs = {
         character,
         identity,
         ethAddress,
-        // Don't pass customPlayerId, let game engine generate it
       );
       
       // ensure Player object has isWorking property
-      const player = game.world.players.get(parseGameId('players', playerId));
-      if (player && player.isWorking === undefined) {
-        player.isWorking = false;
-      }
-      
-      // ensure PlayerDescription object has isWorking property
-      const playerDesc = game.playerDescriptions.get(parseGameId('players', playerId));
-      if (playerDesc && playerDesc.isWorking === undefined) {
-        playerDesc.isWorking = false;
+      try {
+        const { player } = getPlayer(game, playerId);
+        if (player && player.isWorking === undefined) {
+          player.isWorking = false;
+        }
+        
+        // ensure PlayerDescription object has isWorking property
+        const playerDesc = getPlayerDescription(game, playerId);
+        if (playerDesc && playerDesc.isWorking === undefined) {
+          playerDesc.isWorking = false;
+        }
+      } catch (error) {
+        console.error("Error ensuring isWorking property:", error);
       }
       
       game.world.playerAgents.set(
@@ -482,8 +497,8 @@ export const playerInputs = {
           character: character,
           identity: identity,
           avatarPath: `/assets/${character}.png`,
-          createdAt: now, // This `now` is the game engine's `now`
-          updatedAt: now, // This `now` is the game engine's `now`
+          createdAt: now,
+          updatedAt: now,
         }
       };
     },
