@@ -251,7 +251,16 @@ export function movePlayer(
   return;
 }
 
-// optimized findRoute function - improved heuristic function, added search limits and path caching
+/**
+ * Find a path from player's current position to destination using A* algorithm
+ * This function is optimized with caching and improved heuristics
+ * 
+ * @param game - The game instance
+ * @param now - Current timestamp
+ * @param player - The player to find route for
+ * @param destination - Target destination point
+ * @returns Path and potentially adjusted destination, or null if no path found
+ */
 export function findRoute(
   game: Game,
   now: number,
@@ -261,7 +270,7 @@ export function findRoute(
   const startTime = Date.now();
   pathfindingStats.totalCalls++;
   
-  // check path cache
+  // Check path cache first
   const cached = pathCache.get(player.position, destination);
   if (cached) {
     pathfindingStats.cacheHits++;
@@ -271,17 +280,22 @@ export function findRoute(
   
   pathfindingStats.cacheMisses++;
   
-  // use Map instead of 2D array, improve memory efficiency
+  // Use Map instead of 2D array for better memory efficiency
   const minDistances = new Map<string, PathCandidate>();
   
-  // improved heuristic function: diagonal distance + difference between straight distance
+  // Improved heuristic function: diagonal distance + difference between straight distance
   const improvedHeuristic = (pos: Point, dest: Point): number => {
     const dx = Math.abs(pos.x - dest.x);
     const dy = Math.abs(pos.y - dest.y);
-    // diagonal distance + difference between straight distance, more precise than Manhattan distance
+    // Diagonal distance + difference between straight distance, more precise than Manhattan distance
     return Math.max(dx, dy) + (Math.sqrt(2) - 1) * Math.min(dx, dy);
   };
   
+  /**
+   * Explore neighboring positions from current position
+   * @param current - Current path candidate
+   * @returns Array of valid neighboring path candidates
+   */
   const explore = (current: PathCandidate): Array<PathCandidate> => {
     const { x, y } = current.position;
     const neighbors = [];
@@ -314,7 +328,7 @@ export function findRoute(
       if (blocked(game, now, position, player.id)) {
         continue;
       }
-      // use improved heuristic function instead of Manhattan distance
+      // Use improved heuristic function instead of Manhattan distance
       const remaining = improvedHeuristic(position, destination);
       const path = {
         position,
@@ -324,7 +338,7 @@ export function findRoute(
         cost: length + remaining,
         prev: current,
       };
-      // use Map's key instead of 2D array index
+      // Use Map's key instead of 2D array index
       const key = `${position.x},${position.y}`;
       const existingMin = minDistances.get(key);
       if (existingMin && existingMin.cost <= path.cost) {
@@ -349,9 +363,9 @@ export function findRoute(
   let bestCandidate = current;
   const minheap = MinHeap<PathCandidate>((p0, p1) => p0.cost > p1.cost);
   
-  // add search limits to prevent infinite search
+  // Add search limits to prevent infinite search
   let iterations = 0;
-  const maxIterations = 2000; // maximum search iterations
+  const maxIterations = 2000; // Maximum search iterations
   
   while (current && iterations < maxIterations) {
     iterations++;
@@ -371,7 +385,7 @@ export function findRoute(
     current = minheap.pop();
   }
   
-  // if max iterations reached, record warning
+  // If max iterations reached, record warning
   if (iterations >= maxIterations) {
     pathfindingStats.maxIterationsReached++;
     console.warn(`Pathfinding reached max iterations (${maxIterations}) for ${player.name} to ${JSON.stringify(destination)}`);
@@ -396,40 +410,48 @@ export function findRoute(
 
   const result = { path: compressPath(densePath), newDestination };
   
-  // cache path result
+  // Cache path result
   pathCache.set(player.position, destination, result);
   
-  // record performance stats
+  // Record performance stats
   const endTime = Date.now();
   pathfindingStats.totalTime += (endTime - startTime);
   
   return result;
 }
 
-// simplified blocked check, check boundaries, player collisions and layer limits
+/**
+ * Simplified blocked check that verifies if a position is valid for movement
+ * Checks boundaries, player collisions and layer restrictions
+ * 
+ * @param position - Position to check
+ * @param otherPositions - Other player positions to check for collisions
+ * @param map - World map reference
+ * @returns null if position is valid, string reason if blocked
+ */
 function simplifiedBlockedCheck(position: Point, otherPositions: Point[], map: WorldMap) {
-  // check boundaries
+  // Check boundaries
   if (position.x < 0 || position.y < 0 || position.x >= map.width || position.y >= map.height) {
     return "out of bounds";
   }
   
-  // check player collisions
+  // Check player collisions
   for (const otherPosition of otherPositions) {
     if (distance(otherPosition, position) < COLLISION_THRESHOLD) {
       return "player";
     }
   }
   
-  // get integer coordinates of current position
+  // Get integer coordinates of current position
   const x = Math.floor(position.x);
   const y = Math.floor(position.y);
   
-  // ===== layer check logic =====
+  // ===== Layer check logic =====
   
-  // 1. check object layer (objectTiles)
-  // we only want characters to move on the first object layer (index 0), not on other object layers (index 1-4)
+  // 1. Check object layer (objectTiles)
+  // We only want characters to move on the first object layer (index 0), not on other object layers (index 1-4)
   if (map.objectTiles.length > 1) {
-    // check if there are objects on the second and subsequent object layers
+    // Check if there are objects on the second and subsequent object layers
     for (let i = 1; i < map.objectTiles.length; i++) {
       if (map.objectTiles[i]?.[x]?.[y] !== undefined && map.objectTiles[i][x][y] !== -1) {
         return "wrong layer";
@@ -437,8 +459,8 @@ function simplifiedBlockedCheck(position: Point, otherPositions: Point[], map: W
     }
   }
   
-  // 2. ensure player is on a valid layer
-  // either there is content on the background layer (bgTiles), or there is content on the first object layer (objectTiles[0])
+  // 2. Ensure player is on a valid layer
+  // Either there is content on the background layer (bgTiles), or there is content on the first object layer (objectTiles[0])
   const isOnBgLayer = map.bgTiles.length > 0 && 
                      map.bgTiles[0]?.[x]?.[y] !== undefined && 
                      map.bgTiles[0][x][y] !== -1;
@@ -447,52 +469,59 @@ function simplifiedBlockedCheck(position: Point, otherPositions: Point[], map: W
                            map.objectTiles[0]?.[x]?.[y] !== undefined && 
                            map.objectTiles[0][x][y] !== -1;
   
-  // if not on background layer and not on first object layer, block movement
+  // If not on background layer and not on first object layer, block movement
   if (!isOnBgLayer && !isOnFirstObjLayer) {
     return "no valid layer";
   }
   
-  // all checks passed, allow movement
+  // All checks passed, allow movement
   return null;
 }
 
-// find nearest valid position
+/**
+ * Find the nearest valid position to a given position
+ * 
+ * @param game - Game instance
+ * @param position - Starting position to search from
+ * @param playerId - Optional player ID to exclude from collision checks
+ * @returns Valid position or null if none found
+ */
 export function findNearestValidPosition(game: Game, position: Point, playerId?: GameId<'players'>): Point | null {
   const map = game.worldMap;
   const startX = Math.floor(position.x);
   const startY = Math.floor(position.y);
   
-  // initial check current position
+  // Initial check current position
   if (!simplifiedBlockedCheck(position, [], map)) {
     return position;
   }
   
-  // search nearest valid position by distance
-  const maxSearchDistance = 20; // maximum search radius
+  // Search nearest valid position by distance
+  const maxSearchDistance = 20; // Maximum search radius
   const visited = new Set<string>();
   const queue: Array<{x: number, y: number, distance: number}> = [];
   
-  // add starting point to queue
+  // Add starting point to queue
   queue.push({x: startX, y: startY, distance: 0});
   visited.add(`${startX},${startY}`);
   
   while (queue.length > 0) {
     const {x, y, distance} = queue.shift()!;
     
-    // if beyond max search distance, give up
+    // If beyond max search distance, give up
     if (distance > maxSearchDistance) {
-      console.log(`can't find valid position, beyond max search distance`);
+      console.log(`Can't find valid position, beyond max search distance`);
       return null;
     }
     
-    // check if current position is valid
+    // Check if current position is valid
     const currentPos = {x, y};
     if (!simplifiedBlockedCheck(currentPos, [], map)) {
-      console.log(`found valid position: (${x}, ${y}), original position: (${startX}, ${startY})`);
+      console.log(`Found valid position: (${x}, ${y}), original position: (${startX}, ${startY})`);
       return currentPos;
     }
     
-    // check adjacent positions
+    // Check adjacent positions
     const directions = [
       {dx: 1, dy: 0}, {dx: -1, dy: 0}, 
       {dx: 0, dy: 1}, {dx: 0, dy: -1}
@@ -503,7 +532,7 @@ export function findNearestValidPosition(game: Game, position: Point, playerId?:
       const newY = y + dy;
       const key = `${newX},${newY}`;
       
-      // if position is valid and not visited
+      // If position is valid and not visited
       if (newX >= 0 && newY >= 0 && newX < map.width && newY < map.height && !visited.has(key)) {
         queue.push({x: newX, y: newY, distance: distance + 1});
         visited.add(key);
@@ -511,20 +540,27 @@ export function findNearestValidPosition(game: Game, position: Point, playerId?:
     }
   }
   
-  console.log(`can't find valid position`);
+  console.log(`Can't find valid position`);
   return null;
 }
 
-// handle stuck player
+/**
+ * Attempt to rescue a stuck player by moving them to a valid nearby position
+ * 
+ * @param game - Game instance
+ * @param now - Current timestamp
+ * @param player - Player to rescue
+ * @returns true if rescue was successful, false otherwise
+ */
 export function rescueStuckPlayer(game: Game, now: number, player: Player) {
-  console.log(`trying to rescue stuck player ${player.id} from position (${player.position.x}, ${player.position.y})`);
+  console.log(`Trying to rescue stuck player ${player.id} from position (${player.position.x}, ${player.position.y})`);
   
-  // find nearest valid position
+  // Find nearest valid position
   const validPosition = findNearestValidPosition(game, player.position, player.id);
   
   if (validPosition) {
-    // directly set player position, skip pathfinding
-    console.log(`moving player ${player.id} to valid position (${validPosition.x}, ${validPosition.y})`);
+    // Directly set player position, skip pathfinding
+    console.log(`Moving player ${player.id} to valid position (${validPosition.x}, ${validPosition.y})`);
     player.position = validPosition;
     player.speed = 0;
     delete player.pathfinding;
@@ -534,17 +570,26 @@ export function rescueStuckPlayer(game: Game, now: number, player: Player) {
   return false;
 }
 
+/**
+ * Check if a position is blocked for movement
+ * 
+ * @param game - Game instance
+ * @param now - Current timestamp
+ * @param pos - Position to check
+ * @param playerId - Optional player ID to exclude from collision checks
+ * @returns null if position is valid, string reason if blocked
+ */
 export function blocked(game: Game, now: number, pos: Point, playerId?: GameId<'players'>) {
-  // get other players' positions, for collision detection
+  // Get other players' positions, for collision detection
   const otherPositions = [...game.world.players.values()]
     .filter((p) => p.id !== playerId)
     .map((p) => p.position);
   
-  // use improved simplifiedBlockedCheck function, it now includes layer checks
+  // Use improved simplifiedBlockedCheck function, it now includes layer checks
   return simplifiedBlockedCheck(pos, otherPositions, game.worldMap);
 }
 
-// keep function interface consistent, but use our improved layer check logic
+// Keep function interface consistent, but use our improved layer check logic
 export function blockedWithPositions(position: Point, otherPositions: Point[], map: WorldMap) {
   return simplifiedBlockedCheck(position, otherPositions, map);
 }

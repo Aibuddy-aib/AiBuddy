@@ -67,7 +67,6 @@ export const serializedPlayer = {
   human: v.optional(v.string()),
   pathfinding: v.optional(pathfinding),
   character: v.optional(v.string()),
-  description: v.optional(v.string()),
   activity: v.optional(activity),
   lastInput: v.number(),
   position: point,
@@ -94,7 +93,6 @@ export type SerializedPlayer = {
   human?: string;
   pathfinding?: Pathfinding;
   character?: string;
-  description?: string;
   activity?: Activity;
   lastInput: number;
   position: Point;
@@ -124,7 +122,6 @@ export class Player {
   human?: string;
   pathfinding?: Pathfinding;
   character?: string;
-  description?: string;
   activity?: Activity;
   lastInput: number;
   position: Point;
@@ -149,7 +146,6 @@ export class Player {
     this.human = data.human;
     this.pathfinding = data.pathfinding;
     this.character = data.character;
-    this.description = data.description;
     this.activity = data.activity;
     this.lastInput = data.lastInput;
     this.position = data.position;
@@ -441,7 +437,6 @@ export class Player {
     now: number,
     name: string,
     character: string,
-    description: string,
     ethAddress?: string  // Add Ethereum address parameter
   ): GameId<'players'> {
     let position: Point | undefined;
@@ -505,7 +500,6 @@ export class Player {
         lastInput: now,
         position,
         character: character,
-        description: description,
         facing,
         speed: 0,
         name,
@@ -523,7 +517,6 @@ export class Player {
       new PlayerDescription({
         playerId,
         character,
-        description,
         name,
         ethAddress: ethAddress,
         aibtoken: initialTokens,
@@ -550,7 +543,6 @@ export class Player {
       human: this.human,
       pathfinding: this.pathfinding,
       character: this.character,
-      description: this.description,
       activity: this.activity,
       lastInput: this.lastInput,
       position: this.position,
@@ -604,11 +596,9 @@ export async function runPlayerOperation(ctx: MutationCtx, operation: string, ar
   let reference;
   switch (operation) {
     case 'insertEvent':
-      // await ctx.runMutation(internal.aiTown.playerOperations.insertEvent, args);
       reference = internal.aiTown.playerOperations.insertEvent;
       break;
     case 'sendMessageToAgent':
-      // await ctx.runMutation(internal.aiTown.playerOperations.sendMessageToAgent, args);
       reference = internal.aiTown.playerOperations.sendMessageToAgent;
       break;
     case 'scheduleWorkRewards':

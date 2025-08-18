@@ -4,7 +4,6 @@ import { GameId, parseGameId, playerId } from './ids';
 export const serializedPlayerDescription = {
   playerId,
   name: v.string(),
-  description: v.string(),
   character: v.string(),
   ethAddress: v.optional(v.string()),
   aibtoken: v.optional(v.number()),
@@ -17,7 +16,6 @@ export type SerializedPlayerDescription = ObjectType<typeof serializedPlayerDesc
 export class PlayerDescription {
   playerId: GameId<'players'>;
   name: string;
-  description: string;
   character: string;
   ethAddress?: string;
   aibtoken?: number;
@@ -26,10 +24,9 @@ export class PlayerDescription {
   lastEventTime?: number;
 
   constructor(serialized: SerializedPlayerDescription) {
-    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = serialized;
+    const { playerId, name, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = serialized;
     this.playerId = parseGameId('players', playerId);
     this.name = name;
-    this.description = description;
     this.character = character;
     this.ethAddress = ethAddress;
     this.aibtoken = aibtoken;
@@ -39,11 +36,10 @@ export class PlayerDescription {
   }
 
   serialize(): SerializedPlayerDescription {
-    const { playerId, name, description, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = this;
+    const { playerId, name, character, ethAddress, aibtoken, isWorking, workStartTime, lastEventTime } = this;
     return {
       playerId,
       name,
-      description,
       character,
       ethAddress,
       aibtoken,

@@ -106,26 +106,55 @@ export const sendMessageToAgent = internalMutation({
     messageUuid: v.string(),
     operationId: v.string(),
   },
-  handler: async (ctx, args) => {   
-    // Check if conversationId is valid
+  handler: async (ctx, args) => {
+    // Comprehensive parameter validation
     if (!args.conversationId || args.conversationId === '') {
       console.error('playerOperations.sendMessageToAgent: Invalid conversationId:', args.conversationId);
       throw new Error('Invalid conversationId');
     }
-    
-    await ctx.db.insert('messages', {
-      conversationId: args.conversationId,
-      author: args.playerId,
-      messageUuid: args.messageUuid,
-      text: args.text,
-      worldId: args.worldId,
-    });
-        
-    await insertInput(ctx, args.worldId, 'finishSendingMessage', {
-      conversationId: args.conversationId,
-      playerId: args.playerId,
-      timestamp: Date.now(),
-    });
+
+    if (!args.playerId || typeof args.playerId !== 'string') {
+      throw new Error('Invalid playerId');
+    }
+
+    if (!args.text || typeof args.text !== 'string' || args.text.trim().length === 0) {
+      throw new Error('Invalid message text');
+    }
+
+    if (args.text.length > 1000) {
+      throw new Error('Message text too long (max 1000 characters)');
+    }
+
+    if (!args.messageUuid || typeof args.messageUuid !== 'string') {
+      throw new Error('Invalid message UUID');
+    }
+
+    if (!args.worldId) {
+      throw new Error('Invalid world ID');
+    }
+
+    try {
+      // Insert message into database with error handling
+      await ctx.db.insert('messages', {
+        conversationId: args.conversationId,
+        author: args.playerId,
+        messageUuid: args.messageUuid,
+        text: args.text.trim(),
+        worldId: args.worldId,
+      });
+
+      // Trigger message completion processing
+      await insertInput(ctx, args.worldId, 'finishSendingMessage', {
+        conversationId: args.conversationId,
+        playerId: args.playerId,
+        timestamp: Date.now(),
+      });
+
+      console.log(`Successfully inserted message from ${args.playerId} in conversation ${args.conversationId}`);
+    } catch (error: any) {
+      console.error('Failed to insert message or trigger completion:', error);
+      throw new Error(`Message insertion failed: ${error?.message || 'Unknown error'}`);
+    }
   },
 });
 
