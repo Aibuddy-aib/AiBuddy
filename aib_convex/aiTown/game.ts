@@ -13,7 +13,6 @@ import { PlayerDescription, serializedPlayerDescription } from './playerDescript
 import { Location, locationFields, playerLocation } from './location';
 import { runAgentOperation } from './agent';
 import { runPlayerOperation } from './player';
-import { runPlayerAgentOperation } from './playerAgent';
 import { GameId, IdTypes, allocGameId } from './ids';
 import { InputArgs, InputNames, inputs } from './inputs';
 import {
@@ -41,7 +40,7 @@ const gameStateDiff = v.object({
   playerDescriptions: v.optional(v.array(v.object(serializedPlayerDescription))),
   agentDescriptions: v.optional(v.array(v.object(serializedAgentDescription))),
   worldMap: v.optional(v.object(serializedWorldMap)),
-  operations: v.array(v.object({ name: v.string(), type: v.union(v.literal('agent'), v.literal('player'), v.literal('playerAgent')), args: v.any() })),
+  operations: v.array(v.object({ name: v.string(), type: v.union(v.literal('agent'), v.literal('player')), args: v.any() })),
 });
 type GameStateDiff = Infer<typeof gameStateDiff>;
 
@@ -57,7 +56,7 @@ export class Game extends AbstractGame {
   worldMap: WorldMap;
   playerDescriptions: Map<GameId<'players'>, PlayerDescription>;
   agentDescriptions: Map<GameId<'agents'>, AgentDescription>;
-  pendingOperations: Array<{ name: string; type: 'agent' | 'player' | 'playerAgent'; args: any }> = [];
+  pendingOperations: Array<{ name: string; type: 'agent' | 'player' ; args: any }> = [];
   numPathfinds: number;
   pendingHeadMessage?: {
     playerId: GameId<'players'>;
@@ -156,7 +155,7 @@ export class Game extends AbstractGame {
     return id;
   }
 
-  scheduleOperation(name: string, type: 'agent' | 'player' | 'playerAgent', args: unknown) {
+  scheduleOperation(name: string, type: 'agent' | 'player' , args: unknown) {
     this.pendingOperations.push({ name, type, args });
   }
 
@@ -184,9 +183,6 @@ export class Game extends AbstractGame {
     // main game state updates
     for (const player of this.world.players.values()) {
       player.tick(this, now);
-    }
-    for (const playerAgent of this.world.playerAgents.values()) {
-      playerAgent.tick(this, now);
     }
     
     for (const player of this.world.players.values()) {
@@ -394,8 +390,6 @@ export class Game extends AbstractGame {
         await runAgentOperation(ctx, operation.name, operation.args);
       } else if (operation.type === 'player') {
         await runPlayerOperation(ctx, operation.name, operation.args);
-      } else if (operation.type === 'playerAgent') {
-        await runPlayerAgentOperation(ctx, operation.name, operation.args);
       }
     }
   }

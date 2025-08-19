@@ -2,11 +2,10 @@ import { ObjectType } from 'convex/values';
 import { playerInputs } from './playerInputs';
 import { conversationInputs } from './conversation';
 import { agentInputs } from './agentInputs';
-import { playerAgentInputs } from './playerAgent';
 
 // It's easy to hit circular dependencies with these imports,
 // so assert at module scope so we hit errors when analyzing.
-if (playerInputs === undefined || conversationInputs === undefined || agentInputs === undefined || playerAgentInputs === undefined) {
+if (playerInputs === undefined || conversationInputs === undefined || agentInputs === undefined) {
   throw new Error("Input map is undefined, check if there's a circular import.");
 }
 
@@ -16,8 +15,6 @@ export const inputs = {
   ...conversationInputs,
   // Inputs for the agent layer.
   ...agentInputs,
-  // Inputs for the playerAgent layer.
-  ...playerAgentInputs,
 };
 export type Inputs = typeof inputs;
 export type InputNames = keyof Inputs;

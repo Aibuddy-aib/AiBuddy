@@ -1,783 +1,465 @@
-import { useRef, useState, useEffect, useCallback } from 'react';
-import PixiGame from './PixiGame.tsx';
-import ChatPanel from './ChatPanel.tsx';
-import ProfileSidebar from './ProfileSidebar.tsx';
-import ErrorBoundary from './ErrorBoundary.tsx';
-import { useElementSize } from 'usehooks-ts';
-import { Stage } from '@pixi/react';
-import { ConvexProvider, useConvex, useQuery, useMutation } from 'convex/react';
-import PlayerDetails from './PlayerDetails.tsx';
-import { api } from '../../convex/_generated/api';
-import { useWorldHeartbeat } from '../hooks/useWorldHeartbeat.ts';
-import { useHistoricalTime } from '../hooks/useHistoricalTime.ts';
-import { DebugTimeManager } from './DebugTimeManager.tsx';
-import { GameId } from '../../convex/aiTown/ids.ts';
-import { useServerGame } from '../hooks/serverGame.ts';
-import { toast } from 'react-hot-toast';
-import SolanaWalletConnect from './SolanaWalletConnect';
-import SolanaWalletProvider from './SolanaWalletProvider';
-import { Id } from '../../convex/_generated/dataModel';
-import { requestSignature, switchToTargetNetwork, isNetworkSupported } from '../utils/walletSignature';
-import { useSendInput } from '../hooks/sendInput.ts';
-import { DefaultDescription } from '../../data/characters';
+import { Infer, v } from 'convex/values';
+import { Doc, Id } from '../_generated/dataModel';
+import {
+  ActionCtx,
+  DatabaseReader,
+  MutationCtx,
+  internalMutation,
+  internalQuery,
+} from '../_generated/server';
+import { World, serializedWorld } from './world';
+import { WorldMap, serializedWorldMap } from './worldMap';
+import { PlayerDescription, serializedPlayerDescription } from './playerDescription';
+import { Location, locationFields, playerLocation } from './location';
+import { runAgentOperation } from './agent';
+import { runPlayerOperation } from './player';
+import { GameId, IdTypes, allocGameId } from './ids';
+import { InputArgs, InputNames, inputs } from './inputs';
+import {
+  AbstractGame,
+  EngineUpdate,
+  applyEngineUpdate,
+  engineUpdate,
+  loadEngine,
+} from '../engine/abstractGame';
+import { internal } from '../_generated/api';
+import { HistoricalObject } from '../engine/historicalObject';
+import { AgentDescription, serializedAgentDescription } from './agentDescription';
+import { parseMap, serializeMap } from '../util/object';
 
-export const SHOW_DEBUG_UI = !!import.meta.env.VITE_SHOW_DEBUG_UI;
+const gameState = v.object({
+  world: v.object(serializedWorld),
+  playerDescriptions: v.array(v.object(serializedPlayerDescription)),
+  agentDescriptions: v.array(v.object(serializedAgentDescription)),
+  worldMap: v.object(serializedWorldMap),
+});
+type GameState = Infer<typeof gameState>;
 
-// Define types for window.ethereum and window.solana
-declare global {
-  interface Window {
-    ethereum?: any;
-    solana?: any;
-  }
-}
+const gameStateDiff = v.object({
+  world: v.object(serializedWorld),
+  playerDescriptions: v.optional(v.array(v.object(serializedPlayerDescription))),
+  agentDescriptions: v.optional(v.array(v.object(serializedAgentDescription))),
+  worldMap: v.optional(v.object(serializedWorldMap)),
+  operations: v.array(v.object({ name: v.string(), type: v.union(v.literal('agent'), v.literal('player')), args: v.any() })),
+});
+type GameStateDiff = Infer<typeof gameStateDiff>;
 
-// PIXI game component wrapper, wrapped with error boundary
-const PixiGameWrapper = ({ 
-  game, 
-  worldId, 
-  engineId, 
-  width, 
-  height, 
-  historicalTime, 
-  setSelectedElement, 
-  userAddress,
-  convex
-}: any) => {
-  return (
-    <ErrorBoundary fallback={
-      <div className="w-full h-full flex items-center justify-center bg-slate-800 text-white">
-        <div className="text-center p-6 max-w-md">
-          <h3 className="text-xl font-bold mb-4">Game Rendering Error</h3>
-          <p className="mb-4">An error occurred while rendering the game interface. This may be due to network connection issues or resource loading failures.</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Refresh Page
-          </button>
-        </div>
-      </div>
-    }>
-      <Stage width={width} height={height} options={{ backgroundColor: 0x7ab5ff }}>
-        <ConvexProvider client={convex}>
-          <PixiGame
-            game={game}
-            worldId={worldId}
-            engineId={engineId}
-            width={width}
-            height={height}
-            historicalTime={historicalTime}
-            setSelectedElement={setSelectedElement}
-            userAddress={userAddress}
-          />
-        </ConvexProvider>
-      </Stage>
-    </ErrorBoundary>
-  );
-};
+export class Game extends AbstractGame {
+  tickDuration = 16;
+  stepDuration = 1000;
+  maxTicksPerStep = 600;
+  maxInputsPerStep = 32;
 
-function generateSecureRandomName(length: number = 8): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const array = new Uint8Array(length);
-  
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(array);
-  } else {
-    // fallback to Math.random()
-    for (let i = 0; i < length; i++) {
-      array[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(array[i] % chars.length);
-  }
-  return result;
-}
-
-// async function usePlayerHeartbeat(engineId: Id<'engines'>, playerId: Id<'newplayer'>) {
-//   const sendInput = useMutation(api.world.sendWorldInput);
-//   const result = await sendInput({
-//     engineId: engineId,
-//     name: "heartbeat",
-//     args: { playerId }
-//   });
-//   return result;
-// }
-
-interface GameProps {
-  selectedWorldId?: Id<'worlds'> | null;
-  onWorldChange?: (worldId: Id<'worlds'>) => void;
-}
-
-export default function Game({ selectedWorldId, onWorldChange }: GameProps) {
-  const convex = useConvex();
-  const [selectedElement, setSelectedElement] = useState<{
-    kind: 'player';
-    id: GameId<'players'>;
-  }>();
-  
-  // Add wallet connection state
-  const [connectedWalletAddress, setConnectedWalletAddress] = useState<string | null>(null);
-  
-  // Determine if it's a mobile device
-  const [isMobile, setIsMobile] = useState(false);
-  // Add mobile view switching state, add chat option
-  const [mobileView, setMobileView] = useState<'game' | 'profile' | 'details' | 'chat'>('game');
-  
-  // Add registration state tracking
-  const [isRegistered, setIsRegistered] = useState(false);
-  const [player, setPlayer] = useState<any>(null);
-  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
-  
-  // Add world selection logic
-  const [currentWorldId, setCurrentWorldId] = useState<Id<'worlds'> | null>(null);
-  // const [selectedWorldForLogin, setSelectedWorldForLogin] = useState<Id<'worlds'> | null>(null);
-
-  const registrationDelay = useRef<NodeJS.Timeout | null>(null);
-  const pendingAutoRegister = useRef(false);
-
-  // Use the passed selectedWorldId, if not available use default world
-  const worldStatus = useQuery(api.world.defaultWorldStatus);
-  const worldId = selectedWorldId || worldStatus?.worldId;
-  const engineId = worldStatus?.engineId;
-
-  const game = useServerGame(worldId);
-  
-  // Add reference for last registration attempt time
-  // const lastRegistrationAttempt = useRef(0);
-
-  // login
-  const loginMutation = useMutation(api.newplayer.loginPlayer);
-  // register
-  // const registerMutation = useMutation(api.newplayer.registerPlayer);
-  // verify signature
-  const verifySignatureMutation = useMutation(api.newplayer.verifyWalletSignature);
-  // use sendInput Hook
-  const sendCreatePlayerAgent = useSendInput(engineId!, 'createPlayerAgent');
-  // create newplayer record mutation
-  const createPlayerRecord = useMutation(api.newplayer.createPlayerRecord);
-
-  
-  // Listen for worldId changes, assign value on first entry
-  useEffect(() => {
-    if (worldId && !currentWorldId) setCurrentWorldId(worldId);
-  }, [worldId]);
-
-  // Listen for selectedWorldId changes, update current world ID
-  useEffect(() => {
-    if (selectedWorldId) {
-      setCurrentWorldId(selectedWorldId);
-    }
-  }, [selectedWorldId]);
-  
-  // Detect device type
-  useEffect(() => {
-    const checkDeviceType = () => {
-      setIsMobile(window.matchMedia("(max-width: 768px)").matches);
-    };
-    
-    // Initial detection
-    checkDeviceType();
-    
-    // Listen for window size changes
-    window.addEventListener('resize', checkDeviceType);
-    
-    return () => {
-      window.removeEventListener('resize', checkDeviceType);
-    };
-  }, []);
-
-  useEffect(() => {
-    async function checkWalletConnection() {
-      // console.log(`[flash] check ethereum ${window.ethereum} and connectedWalletAddress ${localStorage.getItem('connectedWalletAddress')}`);
-      if (window.ethereum && localStorage.getItem('connectedWalletAddress')) {
-        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        if (accounts.length > 0 && accounts[0]) {
-          setConnectedWalletAddress(accounts[0]);
-          localStorage.setItem('connectedWalletAddress', accounts[0]);
-          // Only login player if not already logged in or if this is the initial load
-          if (!player) {
-            const player = await loginPlayer(accounts[0], selectedWorldId || worldId);
-            if (player) {
-              setPlayer(player);
-            }
-          }
-        } else {
-          setConnectedWalletAddress(null);
-          setPlayer(null);
-          localStorage.removeItem('connectedWalletAddress');
-        }
-      }
-    }
-    if (worldId) {
-      checkWalletConnection();
-    }
-  }, [worldId, player]);
-
-  // Connect Ethereum wallet function with signature authentication
-  const connectWallet = async () => {
-    if (isConnectingWallet) return;
-    
-    setIsConnectingWallet(true);
-    try {
-      // Check if there's MetaMask or other Ethereum provider
-      if (window.ethereum) {
-        console.log("[wallet] Ethereum provider detected");
-        
-        try {
-          // First request user authorization to connect account (popup MetaMask window)
-          console.log("[debug] Requesting user authorization...");
-          const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-          console.log("[debug] Got accounts:", accounts);
-          const account = accounts[0];
-          
-          // After user authorization, check and switch network
-          console.log("[debug] Checking network...");
-          const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-          console.log("[debug] Current network chainId:", chainId);
-          
-          // Check if current network is supported
-          if (!isNetworkSupported(chainId)) {
-            console.log("[debug] Current network not supported, switching to BSC...");
-            toast("Switching to BSC network...");
-            await switchToTargetNetwork();
-          } else if (chainId !== '0x38') {
-            // If on supported network but not BSC mainnet, switch to BSC
-            console.log("[debug] On supported network but not BSC mainnet, switching...");
-            toast("Switching to BSC mainnet for best experience...");
-            await switchToTargetNetwork();
-          } else {
-            console.log("[debug] Already on BSC mainnet");
-          }
-          
-          // Request signature for authentication
-          console.log("[debug] Requesting signature for authentication...");
-          const signatureData = await requestSignature(account);
-          console.log("[debug] Got signature:", signatureData);
-          
-          // Verify signature on backend
-          const verifyResult = await verifySignatureMutation({
-            ethAddress: account,
-            signature: signatureData.signature,
-            message: signatureData.message,
-            worldId: selectedWorldId || worldStatus?.worldId!
-          });
-          
-          if (!verifyResult.success) {
-            if (verifyResult.requiresRegistration) {
-              // Player not found, proceed with registration
-              console.log("[wallet] Player not found, proceeding with registration");
-              const player = await loginPlayer(account, selectedWorldId || worldStatus?.worldId);
-              if (player) {
-                setConnectedWalletAddress(account);
-                setPlayer(player);
-                toast.success("Wallet connected and player registered successfully!");
-              }
-            } else {
-              throw new Error(verifyResult.message);
-            }
-          } else {
-            // Signature verified successfully or player exists in different world
-            console.log("[wallet] Signature verified successfully");
-            setConnectedWalletAddress(account);
-            toast.success("Wallet connected and authenticated successfully!");
-            
-            const player = await loginPlayer(account, selectedWorldId || worldStatus?.worldId);
-            if (player) {
-              setPlayer(player);
-            }
-          }
-        } catch (error) {
-          console.error("[wallet] User rejected the connection or signature request", error);
-          toast.error("Failed to connect wallet. User rejected the request.");
-        }
-      } else {
-        console.log("[wallet] No Ethereum provider found");
-        toast.error("No wallet detected! Please install MetaMask or other Web3 wallet.");
-      }
-    } catch (error) {
-      console.error("[wallet] Error connecting to wallet:", error);
-      toast.error("Failed to connect wallet. Please try again.");
-    } finally {
-      setIsConnectingWallet(false);
-    }
+  world: World;
+  historicalLocations: Map<GameId<'players'>, HistoricalObject<Location>>;
+  descriptionsModified: boolean;
+  worldMap: WorldMap;
+  playerDescriptions: Map<GameId<'players'>, PlayerDescription>;
+  agentDescriptions: Map<GameId<'agents'>, AgentDescription>;
+  pendingOperations: Array<{ name: string; type: 'agent' | 'player'; args: any }> = [];
+  numPathfinds: number;
+  pendingHeadMessage?: {
+    playerId: GameId<'players'>;
+    playerName: string;
+    message: string;
+    timestamp: number;
+  };
+  pendingPlayerEdit?: {
+    playerId: GameId<'players'>;
+    name?: string;
+    character?: string;
+    ethAddress?: string;
+    timestamp: number;
   };
 
-  const loginPlayer = async (account: string, worldId: Id<'worlds'> | undefined) => {
-    const loginResult = await loginMutation({
-      worldId: worldId!,
-      ethAddress: account
-    });
+  constructor(
+    engine: Doc<'engines'>,
+    public worldId: Id<'worlds'>,
+    state: GameState,
+  ) {
+    super(engine);
+    this.world = new World(state.world as any);
+    delete this.world.historicalLocations;
+    this.descriptionsModified = false;
+    this.worldMap = new WorldMap(state.worldMap);
+    this.agentDescriptions = parseMap(state.agentDescriptions, AgentDescription, (a) => a.agentId);
+    this.playerDescriptions = parseMap(
+      state.playerDescriptions,
+      PlayerDescription,
+      (p) => p.playerId,
+    );
+    this.historicalLocations = new Map();
+    this.numPathfinds = 0;
+  }
 
-    // login, if player not found, register player
-    if (!loginResult.success && (loginResult.player === null)) {
-      console.log("[wallet] login player failed, register player: ", loginResult);
-      try {
-        const avatarNumber = Math.floor(Math.random() * 7) + 1;
-        // if it's 2 (Kurt), use 8 instead, otherwise keep the original number
-        const character = `f${avatarNumber === 2 ? 8 : avatarNumber}`;
-        const result = await sendCreatePlayerAgent({
-          name: generateSecureRandomName(8),
-          ethAddress: account,
-          character: character,
-          identity: DefaultDescription.identity,
-        });
-
-        console.debug('Player creation result: ', result);
-        const createRecordResult = await createPlayerRecord({
-          playerId: (result as any).playerId,
-          newplayerData: (result as any).data,
-          worldId: worldId!,
-        });
-        
-        console.debug('Create player record result: ', createRecordResult);
-        
-        // if create record success, login again
-        if (createRecordResult.success) {
-          // retry login
-          const retryLoginResult = await loginMutation({
-            worldId: worldId!,
-            ethAddress: account
-          });
-          
-          if (retryLoginResult.success) {
-            return retryLoginResult.player;
-          }
-        }
-      } catch (error) {
-        console.error('Error creating player: ', error);
-        toast.error('Failed to create player');
-        return;
-      }
+  static async load(
+    db: DatabaseReader,
+    worldId: Id<'worlds'>,
+    generationNumber: number,
+  ): Promise<{ engine: Doc<'engines'>; gameState: GameState }> {
+    const worldDoc = await db.get(worldId);
+    if (!worldDoc) {
+      throw new Error(`No world found with id ${worldId}`);
     }
+    const worldStatus = await db
+      .query('worldStatus')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .unique();
+    if (!worldStatus) {
+      throw new Error(`No engine found for world ${worldId}`);
+    }
+    const engine = await loadEngine(db, worldStatus.engineId, generationNumber);
+    const playerDescriptionsDocs = await db
+      .query('playerDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .collect();
+    const agentDescriptionsDocs = await db
+      .query('agentDescriptions')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .collect();
+    const worldMapDoc = await db
+      .query('maps')
+      .withIndex('worldId', (q) => q.eq('worldId', worldId))
+      .unique();
+    if (!worldMapDoc) {
+      throw new Error(`No map found for world ${worldId}`);
+    }
+    const { _id, _creationTime, historicalLocations: _, ...world } = worldDoc;
+    const playerDescriptions = playerDescriptionsDocs
+      .filter((d) => !!world.players.find((p) => p.id === d.playerId))
+      .map(({ _id, _creationTime, worldId: _, ...doc }) => doc);
+    const agentDescriptions = agentDescriptionsDocs
+      .filter((a) => !!world.agents.find((p) => p.id === a.agentId))
+      .map(({ _id, _creationTime, worldId: _, ...doc }) => doc);
+    const {
+      _id: _mapId,
+      _creationTime: _mapCreationTime,
+      worldId: _mapWorldId,
+      ...worldMap
+    } = worldMapDoc;
+    return {
+      engine,
+      gameState: {
+        world,
+        playerDescriptions,
+        agentDescriptions,
+        worldMap,
+      },
+    };
+  }
 
-    // Handle case where player exists in different world
-    if (loginResult.success && loginResult.player && loginResult.message?.includes('different world')) {
-      const playerWorldId = loginResult.player.worldId;
-      
-      // Switch to player's world
-      setCurrentWorldId(playerWorldId);
-      if (onWorldChange) {
-        onWorldChange(playerWorldId);
+  allocId<T extends IdTypes>(idType: T): GameId<T> {
+    const id = allocGameId(idType, this.world.nextId);
+    this.world.nextId += 1;
+    return id;
+  }
+
+  scheduleOperation(name: string, type: 'agent' | 'player', args: unknown) {
+    this.pendingOperations.push({ name, type, args });
+  }
+
+  handleInput<Name extends InputNames>(now: number, name: Name, args: InputArgs<Name>) {
+    const handler = inputs[name]?.handler;
+    if (!handler) {
+      throw new Error(`Invalid input: ${String(name)}`);
+    }
+    return handler(this, now, args as any);
+  }
+
+  beginStep(_now: number) {
+    this.historicalLocations.clear();
+    for (const player of this.world.players.values()) {
+      this.historicalLocations.set(
+        player.id,
+        new HistoricalObject(locationFields, playerLocation(player)),
+      );
+    }
+    this.numPathfinds = 0;
+  }
+
+  // optimized tick method, reduce position update frequency
+  tick(now: number) {
+    // main game state updates
+    for (const player of this.world.players.values()) {
+      player.tick(this, now);
+    }
+    
+    for (const player of this.world.players.values()) {
+      player.tickPathfinding(this, now);
+    }
+    for (const player of this.world.players.values()) {
+      player.tickPosition(this, now);
+    }
+    
+    // conversation and agent operations need to be updated every tick
+    for (const conversation of this.world.conversations.values()) {
+      conversation.tick(this, now);
+    }
+    for (const agent of this.world.agents.values()) {
+      agent.tick(this, now);
+    }
+    
+    // historical location recording is also optimized
+    // if player is moving, record every tick, otherwise reduce recording frequency
+    for (const player of this.world.players.values()) {
+      let historicalObject = this.historicalLocations.get(player.id);
+      if (!historicalObject) {
+        historicalObject = new HistoricalObject(locationFields, playerLocation(player));
+        this.historicalLocations.set(player.id, historicalObject);
       }
-      
-      // Try to login again in the correct world
-      const retryLoginResult = await loginMutation({
-        worldId: playerWorldId,
-        ethAddress: account
+      historicalObject.update(now, playerLocation(player));
+    }
+  }  
+
+  async saveStep(ctx: ActionCtx, engineUpdate: EngineUpdate): Promise<void> {
+    const diff = this.takeDiff();
+    
+    // save head message
+    if (this.pendingHeadMessage) {
+      await ctx.runMutation(internal.headMessages.saveHeadMessage, {
+        worldId: this.worldId,
+        playerId: this.pendingHeadMessage.playerId,
+        playerName: this.pendingHeadMessage.playerName,
+        message: this.pendingHeadMessage.message,
+        timestamp: this.pendingHeadMessage.timestamp,
       });
-      
-      if (retryLoginResult.success) {
-        localStorage.setItem('connectedWalletAddress', account);
-        return retryLoginResult.player;
-      }
+      // clear pending head message
+      this.pendingHeadMessage = undefined;
+    }
+    
+    // save player edit
+    if (this.pendingPlayerEdit) {
+      await ctx.runMutation(internal.newplayer.savePlayerEdit, {
+        worldId: this.worldId,
+        playerId: this.pendingPlayerEdit.playerId,
+        name: this.pendingPlayerEdit.name,
+        character: this.pendingPlayerEdit.character,
+        ethAddress: this.pendingPlayerEdit.ethAddress,
+        timestamp: this.pendingPlayerEdit.timestamp,
+      });
+      // clear pending player edit
+      this.pendingPlayerEdit = undefined;
     }
 
-    // cache
-    localStorage.setItem('connectedWalletAddress', account);
+    await ctx.runMutation(internal.aiTown.game.saveWorld, {
+      engineId: this.engine._id,
+      engineUpdate,
+      worldId: this.worldId,
+      worldDiff: diff,
+    });
+  }    
 
-    return loginResult.player;
+  takeDiff(): GameStateDiff {
+    const historicalLocations = [];
+    let bufferSize = 0;
+    for (const [id, historicalObject] of this.historicalLocations.entries()) {
+      const buffer = historicalObject.pack();
+      if (!buffer) {
+        continue;
+      }
+      historicalLocations.push({ playerId: id, location: buffer });
+      bufferSize += buffer.byteLength;
+    }
+    if (bufferSize > 0) {
+      console.debug(
+        `Packed ${Object.entries(historicalLocations).length} history buffers in ${(
+          bufferSize / 1024
+        ).toFixed(2)}KiB.`,
+      );
+    }
+    this.historicalLocations.clear();
+
+    const result: GameStateDiff = {
+      world: { ...this.world.serialize(), historicalLocations },
+      operations: this.pendingOperations,
+    };
+    this.pendingOperations = [];
+    
+    if (this.descriptionsModified) {
+      result.playerDescriptions = serializeMap(this.playerDescriptions);
+      result.agentDescriptions = serializeMap(this.agentDescriptions);
+      result.worldMap = this.worldMap.serialize();
+      this.descriptionsModified = false;
+    }
+    return result;
   }
 
-  // Disconnect wallet function
-  const disconnectWallet = () => {
-    // Clear connection state
-    setConnectedWalletAddress(null);
-    
-    // Clear username saved in localStorage, so no character highlighting in scene
-    localStorage.removeItem('currentUserName');
-    localStorage.removeItem('connectedWalletAddress');
-    
-    // Reset other related states
-    setIsRegistered(false);
-    // setIsShowingRegPrompt(false);
-    pendingAutoRegister.current = false;
-    
-    if (registrationDelay.current) {
-      clearTimeout(registrationDelay.current);
-      registrationDelay.current = null;
+  static async saveDiff(ctx: MutationCtx, worldId: Id<'worlds'>, diff: GameStateDiff) {
+    const existingWorld = await ctx.db.get(worldId);
+    if (!existingWorld) {
+      throw new Error(`No world found with id ${worldId}`);
+    }
+    const newWorld = diff.world;
+
+    for (const player of existingWorld.players) {
+      if (!newWorld.players.some((p) => p.id === player.id)) {
+        await ctx.db.insert('archivedPlayers', { worldId, ...player });
+      }
     }
     
-    // Show disconnect success message
-    toast.success("Wallet disconnected successfully");
-    
-    // Add a short delay before refreshing page to ensure disconnect operation completes
-    setTimeout(() => {
-      window.location.reload();
-    }, 100);
-  };
+    for (const conversation of existingWorld.conversations) {
+      if (!newWorld.conversations.some((c) => c.id === conversation.id)) {
+        const participants = conversation.participants.map((p) => p.playerId);
+        const archivedConversation = {
+          worldId,
+          id: conversation.id,
+          created: conversation.created,
+          creator: conversation.creator,
+          ended: Date.now(),
+          lastMessage: conversation.lastMessage,
+          numMessages: conversation.numMessages,
+          participants,
+        };
+        await ctx.db.insert('archivedConversations', archivedConversation);
+        for (let i = 0; i < participants.length; i++) {
+          for (let j = 0; j < participants.length; j++) {
+            if (i == j) {
+              continue;
+            }
+            const player1 = participants[i];
+            const player2 = participants[j];
+            await ctx.db.insert('participatedTogether', {
+              worldId,
+              conversationId: conversation.id,
+              player1,
+              player2,
+              ended: Date.now(),
+            });
+          }
+        }
+      }
+    }
+    for (const conversation of existingWorld.agents) {
+      if (!newWorld.agents.some((a) => a.id === conversation.id)) {
+        await ctx.db.insert('archivedAgents', { worldId, ...conversation });
+      }
+    }
+    // Update the world state.
+    await ctx.db.replace(worldId, newWorld);
 
-  // Handle Solana wallet connection
-  const handleSolanaWalletConnect = useCallback(async (address: string) => {
-    // Check if same as currently connected address to avoid duplicate connection
-    if (connectedWalletAddress === address) {
-      console.log("[solana wallet] Ignore duplicate connection request, same address:", address);
+    // Update the larger description tables if they changed.
+    const { playerDescriptions, agentDescriptions, worldMap } = diff;
+    if (playerDescriptions) {
+      for (const description of playerDescriptions) {
+        const existing = await ctx.db
+          .query('playerDescriptions')
+          .withIndex('worldId', (q) =>
+            q.eq('worldId', worldId).eq('playerId', description.playerId),
+          )
+          .unique();
+        if (existing) {
+          await ctx.db.replace(existing._id, { worldId, ...description });
+        } else {
+          await ctx.db.insert('playerDescriptions', { worldId, ...description });
+        }
+      }
+    }
+    if (agentDescriptions) {
+      for (const description of agentDescriptions) {
+        const existing = await ctx.db
+          .query('agentDescriptions')
+          .withIndex('worldId', (q) => q.eq('worldId', worldId).eq('agentId', description.agentId))
+          .unique();
+        if (existing) {
+          await ctx.db.replace(existing._id, { worldId, ...description });
+        } else {
+          await ctx.db.insert('agentDescriptions', { worldId, ...description });
+        }
+      }
+    }
+    if (worldMap) {
+      const existing = await ctx.db
+        .query('maps')
+        .withIndex('worldId', (q) => q.eq('worldId', worldId))
+        .unique();
+      if (existing) {
+        await ctx.db.replace(existing._id, { worldId, ...worldMap });
+      } else {
+        await ctx.db.insert('maps', { worldId, ...worldMap });
+      }
+    }
+    // Start the desired agent operations.
+    if (!diff.operations || diff.operations.length === 0) {
+      // console.debug("No proxy operations need to be performed");
       return;
     }
-    
-    console.log("[solana wallet] Connected to wallet:", address);
-    setConnectedWalletAddress(address);
-
-    const player = await loginPlayer(address, worldStatus?.worldId);
-    if (player) {
-      setPlayer(player);
-    }
-  }, [connectedWalletAddress, player]);
-
-  // Handle Solana wallet disconnection
-  const handleSolanaWalletDisconnect = useCallback(() => {
-    // Call common disconnect function
-    disconnectWallet();
-  }, []);
-
-  // Use useEffect to check if already registered
-  useEffect(() => {
-    if (player) {
-      console.log("[check] User data queried from database:", player);
-      setIsRegistered(true);
-      
-      if (registrationDelay.current) {
-        clearTimeout(registrationDelay.current);
-        registrationDelay.current = null;
-      }
-    } 
-    
-    // Clear timer when component unmounts
-    return () => {
-      if (registrationDelay.current) {
-        clearTimeout(registrationDelay.current);
-      }
-    };
-  }, [player, connectedWalletAddress, isRegistered]);
-
-  // monitor player change, trigger auto register
-  // useEffect(() => {
-  //   let isMounted = true; // Component mount state marker
-    
-  //   const autoRegister = async () => {
-  //     // Prevent duplicate registration: check if registration was attempted recently (within 1 second)
-  //     const now = Date.now();
-  //     if (now - lastRegistrationAttempt.current < 1000) {
-  //       console.log("[auto register] Ignore duplicate registration requests in short time");
-  //       return;
-  //     }
-      
-  //     lastRegistrationAttempt.current = now;
-  //     if (connectedWalletAddress && !isRegistered && pendingAutoRegister.current && isMounted) {
-  //       console.log("[auto register] Player changed, trigger auto register");
-  //       pendingAutoRegister.current = false;
-  //       await registerMutation({
-  //         worldId: worldId!,
-  //         name: generateSecureRandomName(8),
-  //         ethAddress: connectedWalletAddress,
-  //       });
-  //     }
-  //   };
-    
-  //   autoRegister();
-    
-  //   return () => {
-  //     isMounted = false; // Update marker when component unmounts
-  //   };
-  // }, [connectedWalletAddress, isRegistered, registerMutation]);
-  
-  // Custom setSelectedElement handler function, add logs for debugging
-  const handleSetSelectedElement = (element?: { kind: 'player'; id: GameId<'players'> }) => {
-    console.log("Game: handleSetSelectedElement called, parameter:", element);
-    setSelectedElement(element);
-    console.log("Game: selectedElement updated to:", element);
-    
-    // On mobile, automatically switch to details view after selecting character
-    if (isMobile && element) {
-      handleMobileViewChange('details');
-    } else if (element) {
-      // Desktop also scroll to top
-      window.scrollTo(0, 0);
-      
-      // If there's a scroll view reference, also scroll it to top
-      if (scrollViewRef.current) {
-        scrollViewRef.current.scrollTop = 0;
+    for (const operation of diff.operations) {
+      if (operation.type === 'agent') {
+        await runAgentOperation(ctx, operation.name, operation.args);
+      } else if (operation.type === 'player') {
+        await runPlayerOperation(ctx, operation.name, operation.args);
       }
     }
-  };
-  
-  // Listen for selectedElement changes
-  useEffect(() => {
-    console.log("Game: selectedElement state change:", selectedElement);
-  }, [selectedElement]);
-  
-  // Add ESC key exit functionality
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectedElement) {
-        console.log("Game: ESC key pressed, clearing selection");
-        setSelectedElement(undefined);
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElement]);
-  
-  const [gameWrapperRef, { width, height }] = useElementSize();
-
-  // Add ref to track if initial character has been set
-  const initialPlayerSelected = useRef(false);
-
-  useEffect(() => {
-    // Only set player as self on initial load, use ref to track if already initialized
-    if (player && player.playerId && game && !initialPlayerSelected.current) {
-      setSelectedElement({
-        kind: 'player',
-        id: player.playerId
-      });
-      initialPlayerSelected.current = true; // Mark as initialized
-    }
-  }, [player, game]);
-
-  useWorldHeartbeat();
-
-  const worldState = useQuery(api.world.worldState, worldId ? { worldId } : 'skip');
-  const { historicalTime, timeManager } = useHistoricalTime(worldState?.engine);
-
-  const scrollViewRef = useRef<HTMLDivElement>(null);
-
-  // Handle mobile view switching, special handling for chat view
-  const handleMobileViewChange = (view: 'game' | 'profile' | 'details' | 'chat') => {
-    // When switching to chat view, ensure chat panel is expanded
-    if (view === 'chat') {
-      try {
-        localStorage.setItem('chatPanelCollapsed', 'false');
-      } catch (e) {
-        console.error('Unable to update chat panel state:', e);
-      }
-    }
-    
-    // Scroll to page top
-    window.scrollTo(0, 0);
-    
-    // If view has corresponding container ref, also scroll it to top
-    if (view === 'details' && scrollViewRef.current) {
-      scrollViewRef.current.scrollTop = 0;
-    }
-    
-    setMobileView(view);
-  };
-
-  if (!worldId || !engineId || !game) {
-    return (
-      <div className="h-full w-full flex flex-col items-center justify-center text-white">
-        <div className="text-lg">Loading...</div>
-      </div>
-    );
   }
-  
-  return (
-    <ErrorBoundary>
-      <SolanaWalletProvider>
-      
-      {/* Hidden global Solana wallet connection component, ensure mobile can also use */}
-      <div className="hidden">
-        <SolanaWalletConnect 
-          onWalletConnect={handleSolanaWalletConnect}
-          onWalletDisconnect={handleSolanaWalletDisconnect}
-        />
-      </div>
-      
-      {SHOW_DEBUG_UI && <DebugTimeManager timeManager={timeManager} width={200} height={100} />}
-      {/* Only show ChatPanel on desktop */}
-      {!isMobile && worldId && 
-        <ChatPanel 
-          worldId={worldId} 
-          engineId={engineId} 
-          userData={player} 
-          userAddress={connectedWalletAddress}
-          isMobile={false}
-        />
-      }
-      
-      {/* Official website floating button - only show in production */}
-      {process.env.NODE_ENV === 'production' && (
-        <a 
-          href="https://aibuddy.top/#/" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="fixed top-4 left-4 z-50 px-4 py-2 bg-amber-400 hover:bg-amber-500 text-black rounded-md text-sm font-medium transition-all transform hover:scale-105 shadow-lg"
-        >
-          Official Website
-        </a>
-      )}
-      
-      {/* Mobile layout */}
-      {isMobile ? (
-        <div className="mx-auto w-full flex flex-col h-screen max-w-[1900px] overflow-hidden">
-          {/* Main content area - display different content based on current view, add bottom padding to prevent being covered by navigation bar */}
-          <div className="flex-1 overflow-hidden pb-16">
-            {/* Only render game component when game view is selected, completely unload it when switching */}
-            {mobileView === 'game' ? (
-              <div className="relative h-full overflow-hidden bg-brown-900" ref={gameWrapperRef}>
-                <div className="absolute inset-0">
-                  <div className="w-full h-full">
-                        <PixiGameWrapper
-                          key={`game-${worldId}`} // Add key to ensure component is recreated when switching worlds
-                          game={game}
-                          worldId={worldId}
-                          engineId={engineId}
-                          width={width}
-                          height={height}
-                          historicalTime={historicalTime}
-                          setSelectedElement={handleSetSelectedElement}
-                          userAddress={connectedWalletAddress}
-                          convex={convex}
-                        />
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            
-            {/* Only render profile component when profile view is selected */}
-            {mobileView === 'profile' ? (
-              <div className="h-full overflow-y-auto scrollbar">
-                <ProfileSidebar 
-                  worldId={worldId}
-                  game={game}
-                  userData={player} 
-                  userAddress={connectedWalletAddress} 
-                  onConnectWallet={connectWallet}
-                  onDisconnectWallet={disconnectWallet}
-                  onSolanaWalletConnect={handleSolanaWalletConnect}
-                  onWorldChange={onWorldChange}
-                />
-              </div>
-            ) : null}
-            
-            {/* Only render details component when details view is selected */}
-            {mobileView === 'details' ? (
-              <div className="h-full overflow-y-auto scrollbar" ref={scrollViewRef}>
-                <PlayerDetails
-                  worldId={worldId}
-                  engineId={engineId}
-                  game={game}
-                  playerId={selectedElement?.id}
-                  setSelectedElement={handleSetSelectedElement}
-                  scrollViewRef={scrollViewRef}
-                  userData={player}
-                  userAddress={connectedWalletAddress}
-                />
-              </div>
-            ) : null}
-            
-            {/* Only render chat component when chat view is selected */}
-            {mobileView === 'chat' ? (
-              <div className="h-full flex flex-col bg-gray-900">
-                <div className="flex-1 overflow-hidden">
-                  <ChatPanel 
-                    worldId={worldId} 
-                    engineId={engineId} 
-                    userData={player} 
-                    userAddress={connectedWalletAddress}
-                    isMobile={true}
-                  />
-                </div>
-              </div>
-            ) : null}
-          </div>
-          
-          {/* Bottom navigation bar - fixed at screen bottom */}
-          <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex justify-around p-2 z-10 shadow-lg">
-            <button 
-              onClick={() => handleMobileViewChange('profile')} 
-              className={`p-2 rounded-md flex flex-col items-center ${mobileView === 'profile' ? 'bg-gray-800 text-amber-500' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-300'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <span className="text-xs mt-1">Profile</span>
-            </button>
-            <button 
-              onClick={() => handleMobileViewChange('game')} 
-              className={`p-2 rounded-md flex flex-col items-center ${mobileView === 'game' ? 'bg-gray-800 text-amber-500' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-300'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-xs mt-1">World</span>
-            </button>
-            <button 
-              onClick={() => handleMobileViewChange('details')} 
-              className={`p-2 rounded-md flex flex-col items-center ${mobileView === 'details' ? 'bg-gray-800 text-amber-500' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-300'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-xs mt-1">Details</span>
-            </button>
-            <button 
-              onClick={() => handleMobileViewChange('chat')} 
-              className={`p-2 rounded-md flex flex-col items-center ${mobileView === 'chat' ? 'bg-gray-800 text-amber-500' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-300'}`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-              <span className="text-xs mt-1">Chat</span>
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* Desktop layout - add ProfileSidebar */
-        <div className="mx-auto w-full grid grid-rows-[1fr] grid-cols-[320px_1fr_auto] grow max-w-[1900px] min-h-[600px] max-h-[650px] rounded-b-xl overflow-hidden border-4 border-gray-300 shadow-2xl">
-          {/* Left profile sidebar, fixed width */}
-            <div className="w-[320px] h-full overflow-hidden flex flex-col">
-            <ProfileSidebar 
-              worldId={worldId}
-              game={game}
-              userData={player} 
-              userAddress={connectedWalletAddress} 
-              onConnectWallet={connectWallet}
-              onDisconnectWallet={disconnectWallet}
-              onSolanaWalletConnect={handleSolanaWalletConnect}
-              onWorldChange={onWorldChange}
-            />
-          </div>
-          
-          <div className="relative overflow-hidden bg-brown-900" ref={gameWrapperRef}>
-            <div className="absolute inset-0">
-              <div className="container">
-                <PixiGameWrapper
-                  key={`game-${worldId}`} // Add key to ensure component is recreated when switching worlds
-                  game={game}
-                  worldId={worldId}
-                  engineId={engineId}
-                  width={width}
-                  height={height}
-                  historicalTime={historicalTime}
-                  setSelectedElement={handleSetSelectedElement}
-                  userAddress={connectedWalletAddress}
-                  convex={convex}
-                />
-              </div>
-            </div>
-          </div>
-          <div
-            className="w-72 flex flex-col overflow-y-auto shrink-0 bg-slate-900 border-l border-gray-800 shadow-inner scrollbar"
-            ref={scrollViewRef}
-          >
-            <PlayerDetails
-              worldId={worldId}
-              engineId={engineId}
-              game={game}
-              playerId={selectedElement?.id}
-              setSelectedElement={handleSetSelectedElement}
-              scrollViewRef={scrollViewRef}
-              userData={player}
-              userAddress={connectedWalletAddress}
-            />
-          </div>
-        </div>
-      )}
-      </SolanaWalletProvider>
-    </ErrorBoundary>
-  );
 }
+
+export const loadWorld = internalQuery({
+  args: {
+    worldId: v.id('worlds'),
+    generationNumber: v.number(),
+  },
+  handler: async (ctx, args) => {
+    return await Game.load(ctx.db, args.worldId, args.generationNumber);
+  },
+});
+
+export const saveWorld = internalMutation({
+  args: {
+    engineId: v.id('engines'),
+    engineUpdate,
+    worldId: v.id('worlds'),
+    worldDiff: gameStateDiff,
+  },
+  handler: async (ctx, args) => {
+    try {
+      // first apply engine update
+      await applyEngineUpdate(ctx, args.engineId, args.engineUpdate);
+      
+      // then save world differences - now saveDiff method has been optimized to batch processing
+      await Game.saveDiff(ctx, args.worldId, args.worldDiff);
+      
+      // console.log("World saved successfully, using batch processing");
+    } catch (error: any) {
+      console.error(`Error saving world: ${error.message}`);
+      throw error; // rethrow error so the caller knows there was an issue
+    }
+  },
+});
+
+export const fixPlayerWorkingStatus = internalMutation({
+  handler: async (ctx) => {
+    // get all playerDescriptions
+    const playerDescs = await ctx.db.query("playerDescriptions").collect();
+    let fixCount = 0;
+    
+    for (const desc of playerDescs) {
+      // check if isWorking state or aibtoken needs to be fixed
+      const needsUpdate = desc.isWorking === false || desc.aibtoken === undefined;
+      
+      if (needsUpdate) {
+        const updates: any = {};
+        
+        // if isWorking is false, update to true
+        if (desc.isWorking === false) {
+          updates.isWorking = true;
+        }
+        
+        // if aibtoken is undefined, set to 0
+        if (desc.aibtoken === undefined) {
+          updates.aibtoken = 0;
+        }
+        
+        // apply updates
+        await ctx.db.patch(desc._id, updates);
+        fixCount++;
+        
+        console.log(`Fixed character ${desc.name} status: isWorking=${updates.isWorking !== undefined}, aibtoken=${updates.aibtoken !== undefined ? updates.aibtoken : '未更改'}`);
+      }
+    }
+    
+    return {
+      message: `Fixed ${fixCount} character statuses`,
+      fixCount
+    };
+  }
+});
