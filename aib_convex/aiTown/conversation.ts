@@ -5,7 +5,7 @@ import { Player } from './player';
 import { inputHandler } from './inputHandler';
 
 import { TYPING_TIMEOUT, CONVERSATION_DISTANCE } from '../constants';
-import { distance, normalize, vector } from '../util/geometry';
+import { distance, distanceSquared, normalize, vector } from '../util/geometry';
 import { Point } from '../util/types';
 import { Game } from './game';
 import { stopPlayer, blocked, movePlayer } from './movement';
@@ -63,12 +63,12 @@ export class Conversation {
     const player1 = game.world.players.get(playerId1)!;
     const player2 = game.world.players.get(playerId2)!;
 
-    const playerDistance = distance(player1?.position, player2?.position);
+    const playerDistanceSquared = distanceSquared(player1?.position, player2?.position);
 
     // If the players are both in the "walkingOver" state and they're sufficiently close, transition both
     // of them to "participating" and stop their paths.
     if (member1.status.kind === 'walkingOver' && member2.status.kind === 'walkingOver') {
-      if (playerDistance < CONVERSATION_DISTANCE) {
+      if (playerDistanceSquared < CONVERSATION_DISTANCE * CONVERSATION_DISTANCE) {
         console.log(`Starting conversation between ${player1.id} and ${player2.id}`);
 
         // First, stop the two players from moving.
@@ -87,7 +87,7 @@ export class Conversation {
         ];
         const floorPos1 = { x: Math.floor(player1.position.x), y: Math.floor(player1.position.y) };
         const p1Candidates = neighbors(floorPos1).filter((p) => !blocked(game, now, p, player1.id));
-        p1Candidates.sort((a, b) => distance(a, player2.position) - distance(b, player2.position));
+        p1Candidates.sort((a, b) => distanceSquared(a, player2.position) - distanceSquared(b, player2.position));
         if (p1Candidates.length > 0) {
           const p1Candidate = p1Candidates[0];
 
@@ -97,7 +97,7 @@ export class Conversation {
             (p) => !blocked(game, now, p, player2.id),
           );
           p2Candidates.sort(
-            (a, b) => distance(a, player2.position) - distance(b, player2.position),
+            (a, b) => distanceSquared(a, player2.position) - distanceSquared(b, player2.position),
           );
           if (p2Candidates.length > 0) {
             const p2Candidate = p2Candidates[0];
@@ -125,16 +125,19 @@ export class Conversation {
     if (player.id === invitee.id) {
       throw new Error(`Can't invite yourself to a conversation`);
     }
-    // Ensure the players still exist.
-    if ([...game.world.conversations.values()].find((c) => c.participants.has(player.id))) {
-      const reason = `Player ${player.name} is already in a conversation`;
-      console.log(reason);
-      return { error: reason };
-    }
-    if ([...game.world.conversations.values()].find((c) => c.participants.has(invitee.id))) {
-      const reason = `Player ${invitee.name} is already in a conversation`;
-      console.log(reason);
-      return { error: reason };
+    
+    // Check if either player is already in a conversation
+    for (const conversation of game.world.conversations.values()) {
+      if (conversation.participants.has(player.id)) {
+        const reason = `Player ${player.name} is already in a conversation`;
+        console.log(reason);
+        return { error: reason };
+      }
+      if (conversation.participants.has(invitee.id)) {
+        const reason = `Player ${invitee.name} is already in a conversation`;
+        console.log(reason);
+        return { error: reason };
+      }
     }
     
     // add distance check, ensure characters must be close to each other to start a conversation

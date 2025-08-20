@@ -6,6 +6,12 @@ export function distance(p0: Point, p1: Point): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+export function distanceSquared(p0: Point, p1: Point): number {
+  const dx = p0.x - p1.x;
+  const dy = p0.y - p1.y;
+  return dx * dx + dy * dy;
+}
+
 export function pointsEqual(p0: Point, p1: Point): boolean {
   return p0.x == p1.x && p0.y == p1.y;
 }

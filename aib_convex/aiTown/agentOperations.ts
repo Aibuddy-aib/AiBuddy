@@ -154,21 +154,18 @@ export const agentDoSomething = internalAction({
       if (otherFreePlayers.length > 0 && Math.random() < 0.2) {
         // calculate distance between all other free players and current player
         const playersWithDistance = otherFreePlayers.map(otherPlayer => {
-          const dist = Math.sqrt(
-            Math.pow(player.position.x - otherPlayer.position.x, 2) + 
-            Math.pow(player.position.y - otherPlayer.position.y, 2)
-          );
-          return { player: otherPlayer, distance: dist };
+          const distSquared = distanceSquared(player.position, otherPlayer.position);
+          return { player: otherPlayer, distanceSquared: distSquared };
         });
         
         // sort by distance
-        playersWithDistance.sort((a, b) => a.distance - b.distance);
+        playersWithDistance.sort((a, b) => a.distanceSquared - b.distanceSquared);
         
         // select the nearest player for conversation
         // if distance is more than 20 units, there is a 50% chance to select a random player instead of the nearest one
         // this can add some randomness, avoid characters always talking to the same person
         let selectedPlayer;
-        if (playersWithDistance[0].distance > 30 && Math.random() < 0.3) {
+        if (playersWithDistance[0].distanceSquared > 30*30 && Math.random() < 0.3) {
           const randomIndex = Math.floor(Math.random() * playersWithDistance.length);
           selectedPlayer = playersWithDistance[randomIndex].player;
         } else {
@@ -176,12 +173,9 @@ export const agentDoSomething = internalAction({
         }
         
         // check distance, if it's more than 10 units, move closer to the other player first
-        const distance = Math.sqrt(
-          Math.pow(player.position.x - selectedPlayer.position.x, 2) + 
-          Math.pow(player.position.y - selectedPlayer.position.y, 2)
-        );
+        const distanceSquaredValue = distanceSquared(player.position, selectedPlayer.position);
         
-        if (distance > 10) {
+        if (distanceSquaredValue > 10*10) {
           // if distance is too far, move closer to the other player first
           const midpoint = {
             x: Math.floor((player.position.x + selectedPlayer.position.x) / 2),
@@ -266,12 +260,22 @@ export const agentDoSomething = internalAction({
               },
             });
           } catch (retryError) {
-            console.error(`Agent ${agent.name || agent.id} failed to retry`);
+            console.error(`Retry failed for agent ${agent.id}:`, retryError);
           }
         }
+        return;
       }
     } catch (error) {
-      console.error(`Agent ${agent.name || agent.id} encountered an error during action:`, error);
+      console.error(`agentDoSomething operation failed for agent ${agent.id}:`, error);
+      // Even if there is an error, we still need to finish the operation
+      await ctx.runMutation(api.aiTown.main.sendInput, {
+        worldId: args.worldId,
+        name: 'finishDoSomething',
+        args: {
+          operationId: args.operationId,
+          agentId: agent.id,
+        },
+      });
     }
   },
 });

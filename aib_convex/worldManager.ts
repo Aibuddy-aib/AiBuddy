@@ -114,7 +114,6 @@ export const createNewWorld = mutation({
       agents: [],
       conversations: [],
       players: [],
-      playerAgents: [],
     });
     const worldStatusId = await ctx.db.insert('worldStatus', {
       engineId: engineId,

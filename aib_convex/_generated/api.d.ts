@@ -31,8 +31,6 @@ import type * as aiTown_location from "../aiTown/location.js";
 import type * as aiTown_main from "../aiTown/main.js";
 import type * as aiTown_movement from "../aiTown/movement.js";
 import type * as aiTown_player from "../aiTown/player.js";
-import type * as aiTown_playerAgent from "../aiTown/playerAgent.js";
-import type * as aiTown_playerAgentOperations from "../aiTown/playerAgentOperations.js";
 import type * as aiTown_playerDescription from "../aiTown/playerDescription.js";
 import type * as aiTown_playerInputs from "../aiTown/playerInputs.js";
 import type * as aiTown_playerOperations from "../aiTown/playerOperations.js";
@@ -97,8 +95,6 @@ declare const fullApi: ApiFromModules<{
   "aiTown/main": typeof aiTown_main;
   "aiTown/movement": typeof aiTown_movement;
   "aiTown/player": typeof aiTown_player;
-  "aiTown/playerAgent": typeof aiTown_playerAgent;
-  "aiTown/playerAgentOperations": typeof aiTown_playerAgentOperations;
   "aiTown/playerDescription": typeof aiTown_playerDescription;
   "aiTown/playerInputs": typeof aiTown_playerInputs;
   "aiTown/playerOperations": typeof aiTown_playerOperations;

@@ -1,3 +1,10 @@
+import { distance, distanceSquared } from '../util/geometry';
+
+function distanceSquared(p1: { x: number; y: number }, p2: { x: number; y: number }): number {
+  const dx = p1.x - p2.x;
+  const dy = p1.y - p2.y;
+  return dx * dx + dy * dy;
+}
 import { v } from 'convex/values';
 import { GameId, parseGameId } from './ids';
 import { serializedPlayer } from './player';
@@ -18,7 +25,6 @@ import {
 } from '../constants';
 import { FunctionArgs } from 'convex/server';
 import { MutationCtx, internalMutation, internalQuery } from '../_generated/server';
-import { distance } from '../util/geometry';
 import { internal } from '../_generated/api';
 import { movePlayer } from './movement';
 import { insertInput } from './insertInput';
