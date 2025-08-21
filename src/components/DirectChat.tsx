@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import { Id } from '../../convex/_generated/dataModel';
@@ -109,25 +109,27 @@ const DirectChat: React.FC<DirectChatProps> = ({
 
   // Scroll to bottom when chat is opened
   useEffect(() => {
-    if (isOpen && chatContainerRef.current && messages && messages.length > 0) {
+    if (isOpen && chatContainerRef.current && messages.length > 0) {
       // Small delay to ensure the chat container is fully rendered
-      setTimeout(() => {
+      const scrollTimeout = setTimeout(() => {
         if (chatContainerRef.current) {
           chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
       }, 100);
+      
+      return () => clearTimeout(scrollTimeout);
     }
-  }, [isOpen, messages?.length]);
+  }, [isOpen, messages.length]);
   
   // Check if agent is typing
-  let agentIsTyping = false;
-  if (playerConversation?.isTyping && playerConversation.isTyping.playerId !== playerId) {
-    // Check if the typing message hasn't been sent yet
-    const typingMessageExists = messages.find((m: any) => m.messageUuid === playerConversation.isTyping?.messageUuid);
-    if (!typingMessageExists) {
-      agentIsTyping = true;
+  const agentIsTyping = useCallback(() => {
+    if (!playerConversation?.isTyping || playerConversation.isTyping.playerId === playerId) {
+      return false;
     }
-  }
+    
+    // Check if the typing message hasn't been sent yet
+    return !messages.find((m: any) => m.messageUuid === playerConversation.isTyping?.messageUuid);
+  }, [playerConversation, playerId, messages]);
 
   const sendInput = useMutation(api.world.sendWorldInput);
 
@@ -135,139 +137,120 @@ const DirectChat: React.FC<DirectChatProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   // Shared function to send message
-  const handleSendMessage = async () => {
-    if (!directChatInput.trim() || isLoading) {
-      console.log('DirectChat: Cannot send message - empty input or loading');
+  const handleSendMessage = useCallback(async () => {
+    if (!directChatInput.trim() || isLoading || !agentId || !playerId) {
       return;
     }
 
-    console.log('DirectChat: Starting to send message:', directChatInput.trim());
-    
     try {
       setIsLoading(true);
       
       // Generate a message UUID
       const messageUuid = randomUUID();
-      console.log('DirectChat: Generated message UUID:', messageUuid);
       
       // Use the current conversationId or create a new one
-      console.log(`DirectChat: currentConversationId: ${currentConversationId}, playerConversation?.id: ${playerConversation?.id}`);
       let conversationId = currentConversationId || playerConversation?.id;
-      console.log('DirectChat: Using conversationId:', conversationId);
       
       if (!conversationId) {
-        console.log('DirectChat: Creating new conversation...');
         await sendInput({
           engineId,
           name: 'sendMessageToAgent',
           args: {
             worldId,
-            agentId: agentId!,
-            playerId: playerId!,
+            agentId,
+            playerId,
             conversationId: '',
             text: directChatInput.trim(),
             messageUuid,
-            isDirectChat: true, // mark this is DirectChat, bypass distance check
+            isDirectChat: true,
           }
         });
-        console.log('DirectChat: sendInput completed, waiting for conversation creation...');
         
         // Wait for the conversation to be created, then re-query
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Re-query the conversation - look for conversation with both player and agent
         const updatedConversations = Array.from(game.world.conversations.values());
-        const agentPlayerId = game.world.agents.get(agentId!)?.playerId;
+        const agentPlayerId = game.world.agents.get(agentId)?.playerId;
         const newConversation = updatedConversations.find((c) => {
-          const hasPlayer = c.participants.has(playerId!);
+          const hasPlayer = c.participants.has(playerId);
           const hasAgent = agentPlayerId && c.participants.has(agentPlayerId);
           return hasPlayer && hasAgent;
         });
-        
-        console.log('DirectChat: Found new conversation:', newConversation?.id);
         
         if (newConversation) {
           setCurrentConversationId(newConversation.id);
           conversationId = newConversation.id;
         }
       } else {
-        console.log('DirectChat: Sending message to existing conversation:', conversationId);
         await sendInput({
           engineId,
           name: 'sendMessageToAgent',
           args: {
             worldId,
-            agentId: agentId!,
-            playerId: playerId!,
-            conversationId: conversationId,
+            agentId,
+            playerId,
+            conversationId,
             text: directChatInput.trim(),
             messageUuid,
             isDirectChat: true,
           }
         });
-        console.log('DirectChat: Message sent to existing conversation');
       }
       
       // Clear the input
       setDirectChatInput('');
-      console.log('DirectChat: Message sent successfully, input cleared');
-      
     } catch (error) {
-      console.error('DirectChat: Failed to send message:', error);
+      console.error('Failed to send message:', error);
     } finally {
       setIsLoading(false);
-      console.log('DirectChat: Loading state set to false');
     }
-  };
+  }, [directChatInput, isLoading, agentId, playerId, currentConversationId, playerConversation?.id, 
+      sendInput, engineId, worldId, game.world]);
 
-  const onKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const onKeyDown = useCallback(async (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation();
 
     // Only send message when Enter is pressed
-    if (e.key !== 'Enter') {
-      return;
+    if (e.key === 'Enter') {
+      await handleSendMessage();
     }
+  }, [handleSendMessage]);
 
-    handleSendMessage();
-  };
-
-  const closeDirectChat = async () => {
+  const closeDirectChat = useCallback(async () => {
     if (isLoading || chatState === 'leaving') return;
+    
     try {
       setChatState('leaving');
       const conversationId = currentConversationId || playerConversation?.id;
-      if (conversationId) {
-        console.log('DirectChat: Starting to leave conversation:', conversationId);
+      
+      if (conversationId && agentId && playerId) {
         await sendInput({
           engineId,
           name: 'leaveDirectChat',
           args: {
             worldId,
-            agentId: agentId!,
-            playerId: playerId!,
-            conversationId: conversationId,
+            agentId,
+            playerId,
+            conversationId,
           }
         });
-        console.log('DirectChat: leaveDirectChat operation completed');
         
         // Wait a bit for the backend to process the leave operation
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // Only trigger cooldown if there was an actual conversation
         onLeaveWithCooldown?.();
-        console.log('DirectChat: Cooldown triggered');
-      } else {
-        console.log('DirectChat: No conversation to leave');
       }
     } catch (error) {
-      console.error('DirectChat: Failed to leave conversation:', error);
+      console.error('Failed to leave conversation:', error);
     } finally {
       setChatState('left');
-      setCurrentConversationId(''); // Clear conversation ID first
-      console.log('DirectChat: Conversation ID cleared, closing chat');
-      onClose(); // Call onClose after everything is done
+      setCurrentConversationId('');
+      onClose();
     }
-  }
+  }, [isLoading, chatState, currentConversationId, playerConversation?.id, agentId, playerId, 
+      sendInput, engineId, worldId, onLeaveWithCooldown, onClose]);
 
   if (!isOpen) return null;
 
@@ -294,28 +277,22 @@ const DirectChat: React.FC<DirectChatProps> = ({
   return (
     <div 
       className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50"
-      onClick={() => {
-        if (!isLeaving(chatState)) {
-          closeDirectChat();
-        }
-      }}
+      onClick={closeDirectChat}
     >
       <div 
         className="bg-slate-900 rounded-lg w-[500px] max-w-[90%] h-[600px] max-h-[90%] shadow-2xl overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        <h3 className="bg-slate-700 py-3 px-4 text-sm font-medium text-center uppercase font-system flex justify-between items-center">
+        <div className="bg-slate-700 py-3 px-4 text-sm font-medium text-center uppercase font-system flex justify-between items-center">
           <span className="text-white">DIRECT CONVERSATION</span>
           <button 
-            onClick={() => {
-              closeDirectChat();
-            }}
-            disabled={isLeaving(chatState)}
-            className={`text-gray-400 hover:text-white ${isLeaving(chatState) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            onClick={closeDirectChat}
+            disabled={chatState === 'leaving'}
+            className={`text-gray-400 hover:text-white ${chatState === 'leaving' ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             ✕
           </button>
-        </h3>
+        </div>
         <div className="p-4 flex flex-col h-full gap-3">
           <div className="flex items-center mb-4 flex-shrink-0">
             <div className="bg-slate-800 w-10 h-10 rounded-full flex items-center justify-center overflow-hidden">
@@ -382,33 +359,22 @@ const DirectChat: React.FC<DirectChatProps> = ({
               type="text"
               value={directChatInput}
               onChange={(e) => setDirectChatInput(e.target.value)}
-              onKeyDown={(e) => onKeyDown(e)}
+              onKeyDown={onKeyDown}
               placeholder={`Message ${playerDescription?.name}...`}
-              disabled={isLeaving(chatState)}
+              disabled={chatState === 'leaving'}
               className={`flex-1 p-3 rounded-l bg-slate-600 text-white text-sm font-system focus:outline-none focus:ring-1 focus:ring-indigo-500 border border-slate-500 ${
-                isLeaving(chatState) ? 'opacity-50 cursor-not-allowed' : ''
+                chatState === 'leaving' ? 'opacity-50 cursor-not-allowed' : ''
               }`}
               autoFocus
-              style={{
-                color: 'white',
-                backgroundColor: '#475569',
-                border: '1px solid #64748b',
-                minHeight: '44px',
-                zIndex: 10,
-                position: 'relative'
-              }}
             />
             <button
               onClick={handleSendMessage}
-              disabled={isLoading || !directChatInput.trim() || isLeaving(chatState)}
+              disabled={isLoading || !directChatInput.trim() || chatState === 'leaving'}
               className={`px-4 py-3 rounded-r bg-amber-500 text-black font-system border border-amber-400 ${
-                isLoading || !directChatInput.trim() || isLeaving(chatState) ? 'opacity-50 cursor-not-allowed' : 'hover:bg-amber-400'
+                isLoading || !directChatInput.trim() || chatState === 'leaving' 
+                  ? 'opacity-50 cursor-not-allowed' 
+                  : 'hover:bg-amber-400'
               }`}
-              style={{
-                minHeight: '44px',
-                zIndex: 10,
-                position: 'relative'
-              }}
             >
               Send
             </button>
