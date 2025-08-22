@@ -9,6 +9,16 @@ interface SkillModalProps {
   playerId: string | null;
 }
 
+// 定义技能等级类型
+type SkillLevel = 'Common' | 'Rare' | 'Epic' | 'Hidden';
+
+// 定义技能信息类型
+interface SkillInfo {
+  name: string;
+  image: string;
+  skillId: string;
+}
+
 const SkillModal: React.FC<SkillModalProps> = ({
   isOpen,
   onClose,
@@ -80,7 +90,7 @@ const SkillModal: React.FC<SkillModalProps> = ({
     return Math.max(0, totalCount - usedCount - synthesisCount);
   };
 
-  // Check if card can be used for synthesis (has at least 2 available after excluding used)
+  // Check if card can be used for synthesis (has at least 1 available after excluding used)
   const canUseForSynthesis = (skillId: string) => {
     if (!userSkills) return false;
     const totalCount = userSkills.filter((skill: string) => skill === skillId).length;
@@ -89,7 +99,7 @@ const SkillModal: React.FC<SkillModalProps> = ({
     return (totalCount - usedCount) >= 1;
   };
 
-  // Check if card is disabled in synthesis mode (only 1 available after excluding used)
+  // Check if card is disabled in synthesis mode (no available after excluding used)
   const isDisabledInSynthesis = (skillId: string) => {
     if (!userSkills) return true;
     const totalCount = userSkills.filter((skill: string) => skill === skillId).length;
@@ -144,35 +154,11 @@ const SkillModal: React.FC<SkillModalProps> = ({
   const handleCardToSynthesis = (skillId: string) => {
     if (getAvailableCount(skillId) <= 0) return;
     setSynthesisCards(prev => [...prev, skillId]);
-    
-    // Add hint based on synthesis cards
-    const currentCards = [...synthesisCards, skillId];
-    if (currentCards.length === 1) {
-      const firstCard = SKILL_MAP[skillId as keyof typeof SKILL_MAP];
-      // setSynthesisHint(`Selected ${firstCard.name} (${firstCard.level}). Choose another ${firstCard.level} card to synthesize.`);
-    } else if (currentCards.length === 2) {
-      const firstCard = SKILL_MAP[currentCards[0] as keyof typeof SKILL_MAP];
-      const secondCard = SKILL_MAP[skillId as keyof typeof SKILL_MAP];
-      if (firstCard.level === secondCard.level) {
-        // setSynthesisHint(`Ready to synthesize! ${firstCard.name} + ${secondCard.name} (${firstCard.level} level). Click "Synthesize Cards" to proceed.`);
-      } else {
-        // setSynthesisHint(`Cards must be the same level! You selected ${firstCard.level} and ${secondCard.level}.`);
-      }
-    }
   };
 
   // Handle card removal from synthesis panel
   const handleRemoveFromSynthesis = (index: number) => {
     setSynthesisCards(prev => prev.filter((_, i) => i !== index));
-    
-    // Update hint after removal
-    const remainingCards = synthesisCards.filter((_, i) => i !== index);
-    if (remainingCards.length === 0) {
-      // setSynthesisHint('Select cards to synthesize. Choose 2 cards of the same level.');
-    } else if (remainingCards.length === 1) {
-      const firstCard = SKILL_MAP[remainingCards[0] as keyof typeof SKILL_MAP];
-      // setSynthesisHint(`Selected ${firstCard.name} (${firstCard.level}). Choose another ${firstCard.level} card to synthesize.`);
-    }
   };
 
   // Handle synthesis
@@ -186,7 +172,6 @@ const SkillModal: React.FC<SkillModalProps> = ({
       });
       setSynthesisResult(result);
       setSynthesisCards([]);
-      // setSynthesisHint(''); // Clear hint after synthesis
     } catch (error) {
       console.error('Synthesis failed:', error);
       setSynthesisResult({ success: false });
@@ -219,7 +204,7 @@ const SkillModal: React.FC<SkillModalProps> = ({
       setInternalMode('manage');
       // Clear synthesis result when modal opens
       setSynthesisResult(null);
-        }
+    }
   }, [isOpen, userUsedSkills]);
 
   // Generate skill lists by level from SKILL_MAP
@@ -243,7 +228,7 @@ const SkillModal: React.FC<SkillModalProps> = ({
         image: skill.image,
         level: skill.level
       };
-      });
+    });
   };
 
   // Check if synthesis is valid (same level, 2 cards)
@@ -251,6 +236,160 @@ const SkillModal: React.FC<SkillModalProps> = ({
     if (synthesisCards.length !== 2) return false;
     const cardsInfo = getSynthesisCardsInfo();
     return cardsInfo[0]?.level === cardsInfo[1]?.level;
+  };
+
+  // 根据技能等级获取对应的边框颜色类
+  const getBorderColorClass = (level: string, state: 'normal' | 'synthesis-available' | 'synthesis-selected' | 'selected' | 'used' | 'disabled') => {
+    const baseClass = 'border-2 ';
+    
+    if (state === 'disabled') {
+      return baseClass + 'border-gray-500';
+    }
+    
+    if (state === 'synthesis-selected') {
+      return baseClass + 'border-green-400';
+    }
+    
+    switch (level) {
+      case 'Common':
+        switch (state) {
+          case 'normal': return baseClass + 'border-blue-400';
+          case 'synthesis-available': return baseClass + 'border-blue-400';
+          case 'selected': return baseClass + 'border-green-400';
+          case 'used': return baseClass + 'border-yellow-400';
+          default: return baseClass + 'border-blue-400';
+        }
+      case 'Rare':
+        switch (state) {
+          case 'normal': return baseClass + 'border-purple-400';
+          case 'synthesis-available': return baseClass + 'border-purple-400';
+          case 'selected': return baseClass + 'border-green-400';
+          case 'used': return baseClass + 'border-yellow-400';
+          default: return baseClass + 'border-purple-400';
+        }
+      case 'Epic':
+        switch (state) {
+          case 'normal': return baseClass + 'border-amber-400';
+          case 'synthesis-available': return baseClass + 'border-amber-400';
+          case 'selected': return baseClass + 'border-green-400';
+          case 'used': return baseClass + 'border-yellow-400';
+          default: return baseClass + 'border-amber-400';
+        }
+      case 'Hidden':
+        switch (state) {
+          case 'normal': return baseClass + 'border-red-400';
+          case 'synthesis-available': return baseClass + 'border-red-400';
+          case 'selected': return baseClass + 'border-green-400';
+          case 'used': return baseClass + 'border-yellow-400';
+          default: return baseClass + 'border-red-400';
+        }
+      default:
+        return baseClass + 'border-gray-600';
+    }
+  };
+
+  // 获取背景颜色类
+  const getBackgroundClass = (state: 'normal' | 'synthesis-selected' | 'selected' | 'used') => {
+    switch (state) {
+      case 'synthesis-selected': return 'bg-green-900/20';
+      case 'selected': return 'bg-green-900/20';
+      case 'used': return 'bg-yellow-900/20';
+      default: return '';
+    }
+  };
+
+  // 渲染技能等级区域的通用组件
+  const renderSkillLevelSection = (level: SkillLevel) => {
+    const skills = getSkillsByLevel(level);
+    if (skills.length === 0) return null;
+
+    return (
+      <div>
+        <h3 className="text-lg font-medium text-gray-200 mb-1 sticky top-0 bg-gray-900 py-0.5 z-10">{level}</h3>
+        <div className="grid grid-cols-3 gap-3">
+          {skills.map((profession) => {
+            const availableCount = getAvailableCount(profession.skillId);
+            const owned = hasSkill(profession.skillId);
+            const used = isSkillUsed(profession.skillId);
+            const selected = isSkillSelected(profession.skillId);
+            const canSynthesize = canUseForSynthesis(profession.skillId);
+            const isDisabled = isDisabledInSynthesis(profession.skillId);
+            const isInSynthesis = synthesisCards.includes(profession.skillId);
+            
+            // 确定边框和背景类
+            let borderClass = '';
+            let backgroundClass = '';
+            
+            if (!owned) {
+              borderClass = 'border border-gray-600';
+            } else if (internalMode === 'synthesis') {
+              if (isDisabled) {
+                borderClass = getBorderColorClass(level, 'disabled');
+              } else if (isInSynthesis) {
+                borderClass = getBorderColorClass(level, 'synthesis-selected');
+                backgroundClass = getBackgroundClass('synthesis-selected');
+              } else if (canSynthesize) {
+                borderClass = getBorderColorClass(level, 'synthesis-available');
+              } else {
+                borderClass = getBorderColorClass(level, 'disabled');
+              }
+            } else {
+              if (selected) {
+                borderClass = getBorderColorClass(level, 'selected');
+                backgroundClass = getBackgroundClass('selected');
+              } else if (used) {
+                borderClass = getBorderColorClass(level, 'used');
+                backgroundClass = getBackgroundClass('used');
+              } else {
+                borderClass = getBorderColorClass(level, 'normal');
+              }
+            }
+            
+            return (
+              <div key={profession.name} className="relative">
+                <div
+                  className={`bg-gray-800 p-2 rounded-md flex flex-col items-center transition-all ${borderClass} ${backgroundClass}`}
+                  onClick={() => handleSkillClick(profession.skillId)}
+                >
+                  <img 
+                    src={profession.image} 
+                    alt={profession.name} 
+                    className={`w-20 h-20 object-cover mb-1 ${
+                      owned && !(internalMode === 'synthesis' && isDisabled) ? '' : 'grayscale opacity-50'
+                    }`}
+                  />
+                  <span className={`text-sm text-center ${
+                    owned && !(internalMode === 'synthesis' && isDisabled) ? 'text-white' : 'text-gray-500'
+                  }`}>
+                    {profession.name}
+                  </span>
+                  {availableCount > 1 && (
+                    <div className={`absolute bottom-1 right-1 ${
+                      SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Common' ? 'bg-blue-500' :
+                      SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Rare' ? 'bg-purple-500' :
+                      SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Epic' ? 'bg-amber-500' :
+                      'bg-red-500'
+                    } text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold`}>
+                      {availableCount}
+                    </div>
+                  )}
+                  {used && !selected && (
+                    <div className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      ✓
+                    </div>
+                  )}
+                  {internalMode !== 'synthesis' && selected && (
+                    <div className="absolute top-1 right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      ✓
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   if (!isOpen) return null;
@@ -262,9 +401,9 @@ const SkillModal: React.FC<SkillModalProps> = ({
       }`}>
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
-          <h2 className="text-white text-xl font-semibold">
+            <h2 className="text-white text-xl font-semibold">
               {internalMode === 'synthesis' ? 'Card Synthesis' : 'Your Skill Collection'}
-          </h2>
+            </h2>
             {internalMode !== 'synthesis' && (
               <div className="relative group">
                 <div className="w-4 h-4 bg-gray-600 hover:bg-gray-500 rounded-full flex items-center justify-center cursor-help transition-colors">
@@ -314,295 +453,12 @@ const SkillModal: React.FC<SkillModalProps> = ({
               </div>
             </div>
             <div className="space-y-3 my-2 overflow-y-auto flex-grow pr-1 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-gray-800">
-              {/* Common */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-200 mb-1 sticky top-0 bg-gray-900 py-0.5 z-10">Common</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {getSkillsByLevel('Common').map((profession) => {
-                    const availableCount = getAvailableCount(profession.skillId);
-                    const owned = hasSkill(profession.skillId);
-                    const used = isSkillUsed(profession.skillId);
-                    const selected = isSkillSelected(profession.skillId);
-                    const canSynthesize = canUseForSynthesis(profession.skillId);
-                    const isDisabled = isDisabledInSynthesis(profession.skillId);
-                    const isInSynthesis = synthesisCards.includes(profession.skillId);
-                    return (
-                      <div key={profession.name} className="relative">
-                        <div
-                          className={`bg-gray-800 p-2 rounded-md flex flex-col items-center transition-all ${
-                            owned 
-                              ? internalMode === 'synthesis'
-                                ? isDisabled
-                                  ? 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                  : isInSynthesis
-                                    ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer'
-                                    : canSynthesize
-                                      ? 'border-2 border-blue-400 cursor-pointer'
-                                      : 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                : selected 
-                                  ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer' 
-                                  : used 
-                                    ? 'border-2 border-yellow-400 bg-yellow-900/20 cursor-pointer'
-                                    : 'border-2 border-blue-400 cursor-pointer' 
-                              : 'border border-gray-600'
-                          }`}
-                          onClick={() => handleSkillClick(profession.skillId)}
-                        >
-                          <img 
-                            src={profession.image} 
-                            alt={profession.name} 
-                            className={`w-20 h-20 object-cover mb-1 ${
-                              owned && !(internalMode === 'synthesis' && isDisabled) ? '' : 'grayscale opacity-50'
-                            }`}
-                          />
-                          <span className={`text-sm text-center ${
-                            owned && !(internalMode === 'synthesis' && isDisabled) ? 'text-white' : 'text-gray-500'
-                          }`}>
-                            {profession.name}
-                          </span>
-                          {availableCount > 1 && (
-                            <div className={`absolute bottom-1 right-1 ${
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Common' ? 'bg-blue-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Rare' ? 'bg-purple-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Epic' ? 'bg-amber-500' :
-                              'bg-red-500'
-                            } text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold`}>
-                              {availableCount}
-                            </div>
-                          )}
-                          {used && !selected && (
-                            <div className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                          {internalMode !== 'synthesis' && selected && (
-                            <div className="absolute top-1 right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              {/* Rare */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-200 mb-1 sticky top-0 bg-gray-900 py-0.5 z-10">Rare</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {getSkillsByLevel('Rare').map((profession) => {
-                    const availableCount = getAvailableCount(profession.skillId);
-                    const owned = hasSkill(profession.skillId);
-                    const used = isSkillUsed(profession.skillId);
-                    const selected = isSkillSelected(profession.skillId);
-                    const canSynthesize = canUseForSynthesis(profession.skillId);
-                    const isDisabled = isDisabledInSynthesis(profession.skillId);
-                    const isInSynthesis = synthesisCards.includes(profession.skillId);
-                    return (
-                      <div key={profession.name} className="relative">
-                        <div
-                          className={`bg-gray-800 p-2 rounded-md flex flex-col items-center transition-all ${
-                            owned 
-                              ? internalMode === 'synthesis'
-                                ? isDisabled
-                                  ? 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                  : isInSynthesis
-                                    ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer'
-                                    : canSynthesize
-                                      ? 'border-2 border-purple-400 cursor-pointer'
-                                      : 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                : selected 
-                                  ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer' 
-                                  : used 
-                                    ? 'border-2 border-yellow-400 bg-yellow-900/20 cursor-pointer'
-                                    : 'border-2 border-purple-400 cursor-pointer' 
-                              : 'border border-gray-600'
-                          }`}
-                          onClick={() => handleSkillClick(profession.skillId)}
-                        >
-                          <img 
-                            src={profession.image} 
-                            alt={profession.name} 
-                            className={`w-20 h-20 object-cover mb-1 ${
-                              owned && !(internalMode === 'synthesis' && isDisabled) ? '' : 'grayscale opacity-50'
-                            }`}
-                          />
-                          <span className={`text-sm text-center ${
-                            owned && !(internalMode === 'synthesis' && isDisabled) ? 'text-white' : 'text-gray-500'
-                          }`}>
-                            {profession.name}
-                          </span>
-                          {availableCount > 1 && (
-                            <div className={`absolute bottom-1 right-1 ${
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Common' ? 'bg-blue-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Rare' ? 'bg-purple-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Epic' ? 'bg-amber-500' :
-                              'bg-red-500'
-                            } text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold`}>
-                              {availableCount}
-                            </div>
-                          )}
-                          {used && !selected && (
-                            <div className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                          {internalMode !== 'synthesis' && selected && (
-                            <div className="absolute top-1 right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              {/* Epic */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-200 mb-1 sticky top-0 bg-gray-900 py-0.5 z-10">Epic</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {getSkillsByLevel('Epic').map((profession) => {
-                    const availableCount = getAvailableCount(profession.skillId);
-                    const owned = hasSkill(profession.skillId);
-                    const used = isSkillUsed(profession.skillId);
-                    const selected = isSkillSelected(profession.skillId);
-                    const canSynthesize = canUseForSynthesis(profession.skillId);
-                    const isDisabled = isDisabledInSynthesis(profession.skillId);
-                    const isInSynthesis = synthesisCards.includes(profession.skillId);
-                    return (
-                      <div key={profession.name} className="relative">
-                        <div
-                          className={`bg-gray-800 p-2 rounded-md flex flex-col items-center transition-all ${
-                            owned 
-                              ? internalMode === 'synthesis'
-                                ? isDisabled
-                                  ? 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                  : isInSynthesis
-                                    ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer'
-                                    : canSynthesize
-                                      ? 'border-2 border-amber-400 cursor-pointer'
-                                      : 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                : selected 
-                                  ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer' 
-                                  : used 
-                                    ? 'border-2 border-yellow-400 bg-yellow-900/20 cursor-pointer'
-                                    : 'border-2 border-amber-400 cursor-pointer' 
-                              : 'border border-gray-600'
-                          }`}
-                          onClick={() => handleSkillClick(profession.skillId)}
-                        >
-                          <img 
-                            src={profession.image} 
-                            alt={profession.name} 
-                            className={`w-20 h-20 object-cover mb-1 ${
-                              owned && !(internalMode === 'synthesis' && isDisabled) ? '' : 'grayscale opacity-50'
-                            }`}
-                          />
-                          <span className={`text-sm text-center ${
-                            owned && !(internalMode === 'synthesis' && isDisabled) ? 'text-white' : 'text-gray-500'
-                          }`}>
-                            {profession.name}
-                          </span>
-                          {availableCount > 1 && (
-                            <div className={`absolute bottom-1 right-1 ${
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Common' ? 'bg-blue-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Rare' ? 'bg-purple-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Epic' ? 'bg-amber-500' :
-                              'bg-red-500'
-                            } text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold`}>
-                              {availableCount}
-                            </div>
-                          )}
-                          {used && !selected && (
-                            <div className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                          {internalMode !== 'synthesis' && selected && (
-                            <div className="absolute top-1 right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              {/* Hidden */}
-              <div>
-                <h3 className="text-lg font-medium text-gray-200 mb-1 sticky top-0 bg-gray-900 py-0.5 z-10">Hidden</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {getSkillsByLevel('Hidden').map((profession) => {
-                    const availableCount = getAvailableCount(profession.skillId);
-                    const owned = hasSkill(profession.skillId);
-                    const used = isSkillUsed(profession.skillId);
-                    const selected = isSkillSelected(profession.skillId);
-                    const canSynthesize = canUseForSynthesis(profession.skillId);
-                    const isDisabled = isDisabledInSynthesis(profession.skillId);
-                    const isInSynthesis = synthesisCards.includes(profession.skillId);
-                    return (
-                      <div key={profession.name} className="relative">
-                        <div className={`bg-gray-800 p-2 rounded-md flex flex-col items-center transition-all ${
-                            owned 
-                              ? internalMode === 'synthesis'
-                                ? isDisabled
-                                  ? 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                  : isInSynthesis
-                                    ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer'
-                                    : canSynthesize
-                                      ? 'border-2 border-red-400 cursor-pointer'
-                                      : 'border-2 border-gray-500 opacity-50 cursor-not-allowed'
-                                : selected 
-                                  ? 'border-2 border-green-400 bg-green-900/20 cursor-pointer' 
-                                  : used 
-                                    ? 'border-2 border-yellow-400 bg-yellow-900/20 cursor-pointer'
-                                    : 'border-2 border-red-400 cursor-pointer' 
-                              : 'border border-gray-600'
-                          }`}
-                          onClick={() => handleSkillClick(profession.skillId)}
-                        >
-                          <img 
-                            src={profession.image} 
-                            alt={profession.name} 
-                            className={`w-20 h-20 object-cover mb-1 ${
-                              owned && !(internalMode === 'synthesis' && isDisabled) ? '' : 'grayscale opacity-50'
-                            }`}
-                          />
-                          <span className={`text-sm text-center ${
-                            owned && !(internalMode === 'synthesis' && isDisabled) ? 'text-white' : 'text-gray-500'
-                          }`}>
-                            {profession.name}
-                          </span>
-                          {availableCount > 1 && (
-                            <div className={`absolute bottom-1 right-1 ${
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Common' ? 'bg-blue-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Rare' ? 'bg-purple-500' :
-                              SKILL_MAP[profession.skillId as keyof typeof SKILL_MAP].level === 'Epic' ? 'bg-amber-500' :
-                              'bg-red-500'
-                            } text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold`}>
-                              {availableCount}
-                            </div>
-                          )}
-                          {used && !selected && (
-                            <div className="absolute top-1 right-1 bg-yellow-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                          {internalMode !== 'synthesis' && selected && (
-                            <div className="absolute top-1 right-1 bg-green-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                              ✓
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  </div>
-                </div>
-              </div>
+              {renderSkillLevelSection('Common')}
+              {renderSkillLevelSection('Rare')}
+              {renderSkillLevelSection('Epic')}
+              {renderSkillLevelSection('Hidden')}
             </div>
+          </div>
 
           {/* Synthesis Panel (only shown in synthesis mode) */}
           {internalMode === 'synthesis' && (
@@ -618,13 +474,6 @@ const SkillModal: React.FC<SkillModalProps> = ({
                   <div>• Only cards with quantity ≥ 2 can be used</div>
                 </div>
               </div>
-              {/* Synthesis Hint */}
-              {/* {synthesisHint && (
-                <div className="mb-4 p-3 bg-blue-900/50 border border-blue-500 rounded-md text-sm text-blue-200">
-                  <div className="font-semibold mb-1">💡 Hint:</div>
-                  <div className="text-xs">{synthesisHint}</div>
-                </div>
-              )} */}
               {/* Synthesis Slots */}
               <div className="flex-1 flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -703,7 +552,6 @@ const SkillModal: React.FC<SkillModalProps> = ({
             <button
               onClick={() => {
                 setInternalMode('synthesis');
-                // setSynthesisHint('Select cards to synthesize. Choose 2 cards of the same level.');
               }}
               className="px-5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-md text-sm font-medium transition-colors"
             >
@@ -725,27 +573,26 @@ const SkillModal: React.FC<SkillModalProps> = ({
             <button
               onClick={() => {
                 setInternalMode('manage');
-                setSynthesisResult(null); // Clear synthesis result when switching back
-                // setSynthesisHint(''); // Clear hint when switching back
+                setSynthesisResult(null);
               }}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-sm font-medium transition-colors"
             >
               Back to Skills
             </button>
             <button
-            onClick={() => {
-              onClose();
-              setSynthesisResult(null);
-            }}
-            className="px-5 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md text-sm font-medium"
+              onClick={() => {
+                onClose();
+                setSynthesisResult(null);
+              }}
+              className="px-5 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md text-sm font-medium"
             >
               Close
             </button>
           </div>
         )}
-        </div>
+      </div>
     </div>
   );
 };
 
-export default SkillModal; 
+export default SkillModal;
